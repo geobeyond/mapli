@@ -129,8 +129,9 @@ jobs:
         with:
           python-version: "3.14"
 
+      # Some Rust tests render, so they need the same virtual display as the Python tests (see below)
       - name: "Run Rust tests"
-        run: cargo test --verbose
+        run: xvfb-run -a --server-args="-screen 0 1280x1024x24" cargo test --verbose
 
       - name: "Install Python code with dev dependencies"
         run: uv sync --frozen --group dev
