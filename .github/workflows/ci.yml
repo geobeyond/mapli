@@ -127,7 +127,7 @@ jobs:
       - name: "Set up Python"
         uses: actions/setup-python@v7
         with:
-          python-version-file: "pyproject.toml"
+          python-version: "3.14"
 
       - name: "Run Rust tests"
         run: cargo test --verbose

@@ -18,7 +18,7 @@ readme = "README.md"
 authors = [
     { name = "Ricardo Garcia Silva", email = "ricardo.garcia.silva@gmail.com" }
 ]
-requires-python = ">=3.14"
+requires-python = ">=3.11"
 dependencies = []
 
 [dependency-groups]
