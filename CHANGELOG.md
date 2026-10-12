@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `RenderPool.render_from_bounds()` and `RenderPool.arender_from_bounds()`, which render static
+  images fitted to a bounding box
+- mapli-core: render static images from a bounding box, fitted to the image size with
+  optional padding, bearing and pitch (`Bounds`, `BoundsToFit`). Bounds crossing the
+  antimeridian (`west > east`) are supported
+
+### Changed
+- mapli-core: `StaticRequest.camera` was replaced by `StaticRequest.view`, which takes either a
+  `Camera` or bounds to fit (`View`)
 
 ## [0.2.2] - 2026-10-12
 

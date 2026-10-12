@@ -69,10 +69,14 @@ pub enum Style {
 /// Map camera, in lon/lat order
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Camera {
+    /// Degrees
     pub lon: f64,
+    /// Degrees
     pub lat: f64,
     pub zoom: f64,
+    /// Degrees clockwise from north
     pub bearing: f64,
+    /// Degrees from straight down, in [0, MAX_PITCH]
     pub pitch: f64,
 }
 
@@ -104,22 +108,13 @@ impl Camera {
 
     /// Initialize with an input bearing, in degrees; Accepts any finite value, which gets normalized to [0, 360].
     pub fn with_bearing(mut self, bearing: f64) -> Result<Self> {
-        if !bearing.is_finite() {
-            return Err(MapliError::InvalidInput(format!(
-                "bearing {bearing} is not finite"
-            )));
-        }
-        self.bearing = bearing.rem_euclid(360.0);
+        self.bearing = validate_bearing(bearing)?;
         Ok(self)
     }
 
+    /// Initialize with an input pitch, in degrees from straight down; Accepts [0, MAX_PITCH].
     pub fn with_pitch(mut self, pitch: f64) -> Result<Self> {
-        if !(0.0..=MAX_PITCH).contains(&pitch) {
-            return Err(MapliError::InvalidInput(format!(
-                "pitch {pitch} is not in valid range of [0, {MAX_PITCH}]"
-            )));
-        }
-        self.pitch = pitch;
+        self.pitch = validate_pitch(pitch)?;
         Ok(self)
     }
 
@@ -149,6 +144,203 @@ impl Camera {
             .zoom(self.zoom)
             .bearing(self.bearing)
             .pitch(self.pitch)
+    }
+}
+
+/// Validate a bearing in degrees; Accepts any finite value, which gets normalized to [0, 360].
+fn validate_bearing(bearing: f64) -> Result<f64> {
+    if !bearing.is_finite() {
+        return Err(MapliError::InvalidInput(format!(
+            "bearing {bearing} is not finite"
+        )));
+    }
+    Ok(bearing.rem_euclid(360.0))
+}
+
+fn validate_pitch(pitch: f64) -> Result<f64> {
+    if !(0.0..=MAX_PITCH).contains(&pitch) {
+        return Err(MapliError::InvalidInput(format!(
+            "pitch {pitch} is not in valid range of [0, {MAX_PITCH}]"
+        )));
+    }
+    Ok(pitch)
+}
+
+/// Geographic bounding box, in lon/lat order
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Bounds {
+    west: f64,
+    south: f64,
+    east: f64,
+    north: f64,
+}
+
+impl Bounds {
+    /// Bounds with `west > east` cross the antimeridian, as in GeoJSON (RFC 7946, section 5.2).
+    /// For example, `Bounds::new(170.0, -20.0, -170.0, -15.0)` is 20 degrees wide.
+    pub fn new(west: f64, south: f64, east: f64, north: f64) -> Result<Self> {
+        for lon in [west, east] {
+            if !(-180.0..=180.0).contains(&lon) {
+                return Err(MapliError::InvalidInput(format!(
+                    "lon {lon} not in valid range of [-180, 180]"
+                )));
+            }
+        }
+        for lat in [south, north] {
+            if !(-MAX_LAT..=MAX_LAT).contains(&lat) {
+                return Err(MapliError::InvalidInput(format!(
+                    "lat {lat} not in valid range of [-{MAX_LAT}, {MAX_LAT}]"
+                )));
+            }
+        }
+        // catches west == east and also 180 -> -180, which are zero-width either way
+        if unwrap_east(west, east) == west {
+            return Err(MapliError::InvalidInput(format!(
+                "bounds from west {west} to east {east} have zero width"
+            )));
+        }
+        if south >= north {
+            return Err(MapliError::InvalidInput(format!(
+                "south {south} must be less than north {north}"
+            )));
+        }
+        Ok(Self {
+            west,
+            south,
+            east,
+            north,
+        })
+    }
+
+    pub fn west(&self) -> f64 {
+        self.west
+    }
+    pub fn south(&self) -> f64 {
+        self.south
+    }
+    pub fn east(&self) -> f64 {
+        self.east
+    }
+    pub fn north(&self) -> f64 {
+        self.north
+    }
+
+    pub fn crosses_antimeridian(&self) -> bool {
+        self.west > self.east
+    }
+
+    /// Convert to a maplibre_native LatLngBounds
+    ///
+    /// MapLibre builds the bounds as the hull of both corners, which would turn an
+    /// antimeridian-crossing box into one spanning the rest of the globe. Unwrapping `east`
+    /// past 180 keeps the box on the intended side.
+    pub(crate) fn to_lat_lng_bounds(self) -> maplibre_native::LatLngBounds {
+        maplibre_native::LatLngBounds {
+            southwest: maplibre_native::LatLng {
+                lat: self.south,
+                lng: self.west,
+            },
+            northeast: maplibre_native::LatLng {
+                lat: self.north,
+                lng: unwrap_east(self.west, self.east),
+            },
+        }
+    }
+}
+
+/// Shift `east` past 180 when the bounds cross the antimeridian, so that `west < east`.
+fn unwrap_east(west: f64, east: f64) -> f64 {
+    if west > east { east + 360.0 } else { east }
+}
+
+/// How to frame `Bounds` in the rendered image
+///
+/// The zoom is not known up front: it is derived at render time from the bounds, the padding
+/// and the size of the output image.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BoundsToFit {
+    bounds: Bounds,
+    padding: f64,
+    bearing: f64,
+    pitch: f64,
+}
+
+impl BoundsToFit {
+    pub fn new(bounds: Bounds) -> Self {
+        Self {
+            bounds,
+            padding: 0.0,
+            bearing: 0.0,
+            pitch: 0.0,
+        }
+    }
+
+    /// Initialize with padding, in logical pixels, to leave around the bounds on every side.
+    pub fn with_padding(mut self, padding: f64) -> Result<Self> {
+        if !padding.is_finite() || padding < 0.0 {
+            return Err(MapliError::InvalidInput(format!(
+                "padding {padding} must be finite and >= 0.0"
+            )));
+        }
+        self.padding = padding;
+        Ok(self)
+    }
+
+    /// Initialize with an input bearing, in degrees; Accepts any finite value, which gets normalized to [0, 360].
+    pub fn with_bearing(mut self, bearing: f64) -> Result<Self> {
+        self.bearing = validate_bearing(bearing)?;
+        Ok(self)
+    }
+
+    /// Initialize with an input pitch, in degrees from straight down; Accepts [0, MAX_PITCH].
+    pub fn with_pitch(mut self, pitch: f64) -> Result<Self> {
+        self.pitch = validate_pitch(pitch)?;
+        Ok(self)
+    }
+
+    pub fn bounds(&self) -> Bounds {
+        self.bounds
+    }
+    pub fn padding(&self) -> f64 {
+        self.padding
+    }
+    pub fn bearing(&self) -> f64 {
+        self.bearing
+    }
+    pub fn pitch(&self) -> f64 {
+        self.pitch
+    }
+}
+
+impl From<Bounds> for BoundsToFit {
+    fn from(bounds: Bounds) -> Self {
+        BoundsToFit::new(bounds)
+    }
+}
+
+/// What a static image shows: either an explicit camera or bounds to fit
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum View {
+    Camera(Camera),
+    BoundsToFit(BoundsToFit),
+}
+
+impl From<Camera> for View {
+    fn from(camera: Camera) -> Self {
+        View::Camera(camera)
+    }
+}
+
+impl From<BoundsToFit> for View {
+    fn from(fit: BoundsToFit) -> Self {
+        View::BoundsToFit(fit)
+    }
+}
+
+/// Fit the bounds with no padding, bearing nor pitch
+impl From<Bounds> for View {
+    fn from(bounds: Bounds) -> Self {
+        View::BoundsToFit(bounds.into())
     }
 }
 
@@ -198,7 +390,9 @@ impl Hash for PixelRatio {
 /// Output image dimensions
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ImageSpec {
+    /// Logical pixels; the output image is `width * pixel_ratio` pixels wide
     pub width: NonZeroU32,
+    /// Logical pixels; the output image is `height * pixel_ratio` pixels high
     pub height: NonZeroU32,
     pub pixel_ratio: PixelRatio,
 }
@@ -289,15 +483,37 @@ impl Rendered {
 #[derive(Debug, Clone)]
 pub struct StaticRequest {
     pub style: StyleId,
-    pub camera: Camera,
+    pub view: View,
     pub spec: ImageSpec,
     pub format: OutputFormat,
+}
+
+impl StaticRequest {
+    /// Check that the view fits in the image.
+    ///
+    /// Bounds padding must leave some room for the bounds themselves, otherwise MapLibre
+    /// cannot compute a zoom level for them.
+    pub fn validate(&self) -> Result<()> {
+        if let View::BoundsToFit(fit) = self.view {
+            let min_side = self.spec.width.min(self.spec.height).get();
+            if 2.0 * fit.padding() >= f64::from(min_side) {
+                return Err(MapliError::InvalidInput(format!(
+                    "padding {} leaves no room for the bounds in a {}x{} image",
+                    fit.padding(),
+                    self.spec.width,
+                    self.spec.height
+                )));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct TileRequest {
     pub style: StyleId,
     pub tile: TileCoord,
+    /// Tile edge, in logical pixels; the output image is `tile_size * pixel_ratio` pixels wide
     pub tile_size: NonZeroU32,
     pub pixel_ratio: PixelRatio,
     pub format: OutputFormat,
@@ -390,5 +606,52 @@ mod tests {
         assert!(req(0, 512).validate().is_ok());
         assert!(req(1, 256).validate().is_ok());
         assert!(req(0, 1024).validate().is_ok());
+    }
+
+    #[test]
+    fn bounds_rejects_invalid() {
+        assert!(Bounds::new(-181.0, 0.0, 0.0, 1.0).is_err());
+        assert!(Bounds::new(0.0, -89.0, 1.0, 1.0).is_err());
+        assert!(Bounds::new(0.0, 1.0, 1.0, 0.0).is_err()); // south > north
+        assert!(Bounds::new(0.0, 0.0, 0.0, 1.0).is_err()); // zero width
+        assert!(Bounds::new(180.0, 0.0, -180.0, 1.0).is_err()); // zero width, wrapped
+        assert!(Bounds::new(-180.0, 0.0, 180.0, 1.0).is_ok()); // whole world
+        assert!(Bounds::new(-9.6, 36.9, -6.1, 42.2).is_ok());
+    }
+
+    #[test]
+    fn bounds_crossing_antimeridian_are_unwrapped() {
+        let b = Bounds::new(170.0, -20.0, -170.0, -15.0).unwrap();
+        assert!(b.crosses_antimeridian());
+        let ll = b.to_lat_lng_bounds();
+        assert_eq!((ll.southwest.lng, ll.northeast.lng), (170.0, 190.0));
+
+        let b = Bounds::new(-10.0, 0.0, 10.0, 1.0).unwrap();
+        assert!(!b.crosses_antimeridian());
+        let ll = b.to_lat_lng_bounds();
+        assert_eq!((ll.southwest.lng, ll.northeast.lng), (-10.0, 10.0));
+    }
+
+    #[test]
+    fn bounds_to_fit_rejects_invalid_padding() {
+        let fit = BoundsToFit::new(Bounds::new(0.0, 0.0, 1.0, 1.0).unwrap());
+        assert!(fit.with_padding(-1.0).is_err());
+        assert!(fit.with_padding(f64::NAN).is_err());
+        assert!(fit.with_padding(16.0).is_ok());
+    }
+
+    #[test]
+    fn static_request_rejects_padding_too_large_for_image() {
+        let req = |padding| StaticRequest {
+            style: "s".into(),
+            view: BoundsToFit::new(Bounds::new(0.0, 0.0, 1.0, 1.0).unwrap())
+                .with_padding(padding)
+                .unwrap()
+                .into(),
+            spec: ImageSpec::new(200, 100).unwrap(),
+            format: OutputFormat::Raw,
+        };
+        assert!(req(49.0).validate().is_ok());
+        assert!(req(50.0).validate().is_err());
     }
 }

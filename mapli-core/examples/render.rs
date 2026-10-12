@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let req = StaticRequest {
         style: "demo".into(),
-        camera: Camera::new(-9.14, 38.72, 4.0)?,
+        view: Camera::new(-9.14, 38.72, 4.0)?.into(),
         spec: ImageSpec::new(512, 512)?,
         format: OutputFormat::Png,
     };

@@ -10,12 +10,14 @@ use std::sync::Arc;
 
 use crossbeam_channel::Receiver;
 use image::RgbaImage;
-use maplibre_native::{ImageRenderer, ImageRendererBuilder, Static, Tile};
+use maplibre_native::{EdgeInsets, ImageRenderer, ImageRendererBuilder, Static, Tile};
 
 use crate::encode::encode;
 use crate::error::{MapliError, Result};
 use crate::pool::StyleRegistry;
-use crate::types::{ImageSpec, PixelRatio, Rendered, StaticRequest, Style, StyleId, TileRequest};
+use crate::types::{
+    ImageSpec, PixelRatio, Rendered, StaticRequest, Style, StyleId, TileRequest, View,
+};
 
 pub(crate) type Reply = oneshot::Sender<Result<Rendered>>;
 
@@ -86,8 +88,18 @@ impl Worker {
             Ok(renderer)
         })?;
 
+        // Fitting bounds needs the renderer, as the resulting zoom depends on its size
+        let camera = match req.view {
+            View::Camera(camera) => camera.to_camera_update(),
+            View::BoundsToFit(fit) => renderer.camera_for_bounds(
+                fit.bounds().to_lat_lng_bounds(),
+                Some(EdgeInsets::all(fit.padding())),
+                fit.bearing(),
+                fit.pitch(),
+            ),
+        };
         let image = renderer
-            .render_static(&req.camera.to_camera_update())
+            .render_static(&camera)
             .map_err(|e| MapliError::RenderFailed(e.to_string()))?;
 
         // Copy into an owned, Send buffer that can leave this thread

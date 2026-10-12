@@ -113,6 +113,7 @@ impl RenderPool {
 
     /// Render a static map image using the pool of workers.
     pub fn render(&self, req: StaticRequest) -> Result<Rendered> {
+        req.validate()?;
         self.ensure_style(&req.style)?;
         Self::wait(self.submit(|reply| Command::Static { req, reply })?)
     }
@@ -129,8 +130,9 @@ impl RenderPool {
         &self,
         req: StaticRequest,
     ) -> impl Future<Output = Result<Rendered>> + Send + use<> {
-        let submitted = self
-            .ensure_style(&req.style)
+        let submitted = req
+            .validate()
+            .and_then(|()| self.ensure_style(&req.style))
             .and_then(|()| self.submit(|reply| Command::Static { req, reply }));
         Self::wait_async(submitted)
     }
