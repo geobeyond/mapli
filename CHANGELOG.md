@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Prebuilt wheels for ARM64 (aarch64) Linux
+
 
 ## [0.2.0] - 2026-10-09
 
