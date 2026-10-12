@@ -8,7 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
-## [0.3.0] - 2026-10-12
+## [0.3.1] - 2026-10-12
+
+### Fixed
+- CI: rendering tests failed intermittently on some ARM runners, where Mesa tried an unsupported
+  hardware path under Xvfb. Tests now force Mesa's software renderer (`LIBGL_ALWAYS_SOFTWARE=1`),
+  and the Rust tests also run under Xvfb
+
+
+## [0.3.0] - 2026-10-12 [YANKED]
+
+Tagged but never published: the release CI failed. Use 0.3.1, which has the same changes.
 
 ### Added
 - `RenderPool.render_from_bounds()` and `RenderPool.arender_from_bounds()`, which render static
@@ -43,8 +53,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
-[unreleased]: https://github.com/ricardogsilva/mapli
-[0.3.0]: https://github.com/ricardogsilva/mapli/releases/tag/v0.3.0
-[0.2.2]: https://github.com/ricardogsilva/mapli/releases/tag/v0.2.2
-[0.2.1]: https://github.com/ricardogsilva/mapli/releases/tag/v0.2.1
-[0.2.0]: https://github.com/ricardogsilva/mapli/releases/tag/v0.2.0
+[unreleased]: https://github.com/geobeyond/mapli
+[0.3.1]: https://github.com/geobeyond/mapli/releases/tag/v0.3.1
+[0.3.0]: https://github.com/geobeyond/mapli/releases/tag/v0.3.0
+[0.2.2]: https://github.com/geobeyond/mapli/releases/tag/v0.2.2
+[0.2.1]: https://github.com/geobeyond/mapli/releases/tag/v0.2.1
+[0.2.0]: https://github.com/geobeyond/mapli/releases/tag/v0.2.0

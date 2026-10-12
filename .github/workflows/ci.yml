@@ -131,6 +131,8 @@ jobs:
 
       # Some Rust tests render, so they need the same virtual display as the Python tests (see below)
       - name: "Run Rust tests"
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
         run: xvfb-run -a --server-args="-screen 0 1280x1024x24" cargo test --verbose
 
       - name: "Install Python code with dev dependencies"
@@ -147,8 +149,11 @@ jobs:
 
       # Runners have no GPU or display. MapLibre's EGL headless backend calls
       # eglGetDisplay(EGL_DEFAULT_DISPLAY), which needs a display to fall back to
-      # Mesa's llvmpipe software renderer, so provide a virtual one.
+      # Mesa's llvmpipe software renderer, so provide a virtual one. LIBGL_ALWAYS_SOFTWARE makes
+      # Mesa use llvmpipe directly, in case the host exposes a GPU device (see test_wheel).
       - name: "Run Python tests"
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
         run: xvfb-run -a --server-args="-screen 0 1280x1024x24" uv run pytest
 
   # Builds the distributable manylinux wheels, one per architecture, each on a native runner. This
@@ -249,5 +254,9 @@ jobs:
           uv venv --python 3.14
           uv pip install dist/*.whl pytest
 
+      # Some ARM runner hosts expose a GPU device, so Mesa tries DRI3, which Xvfb does not support,
+      # and eglInitialize() fails instead of falling back. Force the llvmpipe software renderer.
       - name: "Run Python tests against the wheel"
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
         run: xvfb-run -a --server-args="-screen 0 1280x1024x24" .venv/bin/pytest
