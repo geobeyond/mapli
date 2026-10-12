@@ -287,7 +287,7 @@ fn build_static_request(
     let spec = ImageSpec::new(width, height)?.with_pixel_ratio(PixelRatio::new(pixel_ratio)?);
     Ok(StaticRequest {
         style: style_id.into(),
-        camera,
+        view: camera.into(),
         spec,
         format: OutputFormat::Png,
     })
