@@ -131,6 +131,8 @@ jobs:
 
       # Some Rust tests render, so they need the same virtual display as the Python tests (see below)
       - name: "Run Rust tests"
+        # generous, as this step also compiles maplibre-native when the caches miss
+        timeout-minutes: 45
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: xvfb-run -a --server-args="-screen 0 1280x1024x24" cargo test --verbose
@@ -152,6 +154,7 @@ jobs:
       # Mesa's llvmpipe software renderer, so provide a virtual one. LIBGL_ALWAYS_SOFTWARE makes
       # Mesa use llvmpipe directly, in case the host exposes a GPU device (see test_wheel).
       - name: "Run Python tests"
+        timeout-minutes: 10
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: xvfb-run -a --server-args="-screen 0 1280x1024x24" uv run pytest
@@ -257,6 +260,7 @@ jobs:
       # Some ARM runner hosts expose a GPU device, so Mesa tries DRI3, which Xvfb does not support,
       # and eglInitialize() fails instead of falling back. Force the llvmpipe software renderer.
       - name: "Run Python tests against the wheel"
+        timeout-minutes: 10
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: xvfb-run -a --server-args="-screen 0 1280x1024x24" .venv/bin/pytest

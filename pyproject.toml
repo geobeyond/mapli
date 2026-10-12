@@ -29,6 +29,10 @@ dev = [
     "ty>=0.0.84",
 ]
 
+[tool.pytest.ini_options]
+# dump the traceback of every thread if a test runs for longer than this, to diagnose hangs
+faulthandler_timeout = 60
+
 [tool.uv]
 cache-keys = [
     { file = "pyproject.toml" },
