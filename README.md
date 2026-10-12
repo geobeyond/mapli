@@ -12,11 +12,11 @@ At the moment this project is not on PyPi. However, we upload prebuilt wheels as
 means you can point either `uv` or `pip` to them in order to get this installed:
 
 ```shell
-uv add "https://github.com/ricardogsilva/mapli/releases/download/v0.2.0/mapli-0.2.0-cp39-abi3-manylinux_2_34_x86_64.whl"
+uv add "https://github.com/geobeyond/mapli/releases/download/v0.2.0/mapli-0.2.0-cp39-abi3-manylinux_2_34_x86_64.whl"
 ```
 
 ```shell
-pip install "https://github.com/ricardogsilva/mapli/releases/download/v0.2.0/mapli-0.2.0-cp39-abi3-manylinux_2_34_x86_64.whl"
+pip install "https://github.com/geobeyond/mapli/releases/download/v0.2.0/mapli-0.2.0-cp39-abi3-manylinux_2_34_x86_64.whl"
 ```
 
 
@@ -74,9 +74,8 @@ rendered at `z=0`. Use `pixel_ratio=2` for high-DPI ("@2x") tiles.
 > [!IMPORTANT]
 >
 > For now only Linux is supported. 
-> Prebuilt wheels are available for x86_64 and need glibc 2.34 or newer (e.g. Ubuntu 22.04+,
-> Debian 12+, RHEL 9+). ARM64 should also work when building from source, but no wheels are 
-> built for it yet.
+> Prebuilt wheels are available for x86_64 and ARM64 (aarch64) and need glibc 2.34 or newer
+> (e.g. Ubuntu 22.04+, Debian 12+, RHEL 9+).
 >
 > macOS on Apple Silicon should also be possible via MapLibre Native's Metal 
 > backend but is not yet built or tested. 

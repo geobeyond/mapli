@@ -12,9 +12,9 @@ on:
 
   workflow_call:
     outputs:
-      artifact_name:
-        description: "Name of the uploaded wheel artifact"
-        value: ${{ jobs.build_wheel.outputs.artifact_name }}
+      artifact_pattern:
+        description: "Pattern matching the names of the uploaded wheel artifacts (one per platform)"
+        value: ${{ jobs.build_wheel.outputs.artifact_pattern }}
 
 jobs:
   # clippy runs as a check build, which cargo keeps separate from the regular build, so it needs its
@@ -150,16 +150,29 @@ jobs:
       - name: "Run Python tests"
         run: xvfb-run -a --server-args="-screen 0 1280x1024x24" uv run pytest
 
-  # Builds the distributable manylinux wheel. This is a release-mode build (another full
-  # maplibre-native compile), so it is skipped on pull requests.
+  # Builds the distributable manylinux wheels, one per architecture, each on a native runner. This
+  # is a release-mode build (another full maplibre-native compile), so it is skipped on pull requests.
   build_wheel:
     if: ${{ github.event_name != 'pull_request' }}
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+            image: quay.io/pypa/manylinux_2_34_x86_64:2026.10.03-1@sha256:e4ca528d41ab66b3654110295d7a2c7bfa599ddbb6efb269ec21f7f73b88f1b6
+            # the sdist is the same for every architecture, so only one leg builds it
+            build_sdist: "1"
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            image: quay.io/pypa/manylinux_2_34_aarch64:2026.10.03-1@sha256:59827f7c1914f4c0ba114cfa2d0f83104a6b17a8eafb9c2abd45f929db090107
+            build_sdist: "0"
+    runs-on: ${{ matrix.runner }}
     # The wheel is built inside the manylinux image, so it links against that image's old glibc and
     # runs on any distro with the same or a newer one. scripts/build-manylinux-wheel.sh has the details.
-    container: quay.io/pypa/manylinux_2_34_x86_64:2026.10.03-1@sha256:e4ca528d41ab66b3654110295d7a2c7bfa599ddbb6efb269ec21f7f73b88f1b6
+    container: ${{ matrix.image }}
     env:
-      ARTIFACT_NAME: "python-package"
+      BUILD_SDIST: ${{ matrix.build_sdist }}
       MLN_CMAKE_CXX_LAUNCHER: "ccache"
       # Inside the container, the workspace is under /__w and $HOME is /github/home. Keep the cargo
       # and rustup homes under /__w too, so a single ccache base dir covers both the maplibre-native
@@ -168,8 +181,9 @@ jobs:
       RUSTUP_HOME: "/__w/.rustup"
       CCACHE_BASEDIR: "/__w"
       CCACHE_NOHASHDIR: "true"
+    # Matrix job outputs are last-writer-wins, so expose a pattern that matches every leg's artifact
     outputs:
-      artifact_name: ${{ env.ARTIFACT_NAME }}
+      artifact_pattern: "wheels-*"
     steps:
       - uses: actions/checkout@v7
 
@@ -184,7 +198,7 @@ jobs:
       - name: "Cache maplibre-native C++ objects"
         uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
         with:
-          key: ${{ github.job }}
+          key: ${{ github.job }}-${{ matrix.arch }}
           max-size: 2G
 
       - name: "Build manylinux wheel and sdist"
@@ -193,15 +207,23 @@ jobs:
       - name: "Upload built wheel as artifact"
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: "${{ env.ARTIFACT_NAME }}"
+          name: "wheels-linux-${{ matrix.arch }}"
           path: dist/
           retention-days: 2
 
-  # Installs the built wheel on a plain Ubuntu runner, with only the runtime dependencies that the
-  # README asks users to install, and runs the test suite against it.
+  # Installs each built wheel on a plain Ubuntu runner of the same architecture, with only the
+  # runtime dependencies that the README asks users to install, and runs the test suite against it.
   test_wheel:
     needs: build_wheel
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: "Install runtime dependencies"
         run: |
@@ -213,7 +235,7 @@ jobs:
       - name: "Download built wheel"
         uses: actions/download-artifact@v8.0.1
         with:
-          name: ${{ needs.build_wheel.outputs.artifact_name }}
+          name: "wheels-linux-${{ matrix.arch }}"
           path: dist
 
       - name: "Set up uv"

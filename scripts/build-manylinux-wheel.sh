@@ -1,25 +1,31 @@
 #!/usr/bin/env bash
 # Build a manylinux wheel (and the sdist) for mapli.
 #
-# This must run inside the quay.io/pypa/manylinux_2_34_x86_64 container, from the repository root.
-# CI runs it as a container job; locally, run it with docker:
+# This must run inside a quay.io/pypa/manylinux_2_34_<arch> container (x86_64 or aarch64), from the
+# repository root. The wheel's platform tag follows the container's architecture. CI runs it as a
+# container job; locally, run it with docker:
 #
 #   docker run --rm -v "$PWD":/io -w /io \
 #       -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
 #       -e CARGO_TARGET_DIR=/build/target -v mapli-manylinux-build:/build \
 #       quay.io/pypa/manylinux_2_34_x86_64 scripts/build-manylinux-wheel.sh
 #
+# For an aarch64 wheel, use the quay.io/pypa/manylinux_2_34_aarch64 image instead (and a separate
+# build volume). On an x86_64 host this needs QEMU emulation (`--platform linux/arm64`) and is slow.
+#
 # Setting CARGO_TARGET_DIR to a docker volume keeps the container's build out of the host's
 # `target/` dir and makes reruns incremental.
 #
 # Usage: build-manylinux-wheel.sh [deps|build|all] (default: all)
 #   deps   install system packages, Rust and maturin
-#   build  build the wheel and sdist into $OUT_DIR (default: dist)
+#   build  build the wheel and sdist into $OUT_DIR (default: dist). Set BUILD_SDIST=0 to skip the
+#          sdist, e.g. when building the same release for several architectures.
 set -euxo pipefail
 
-PLAT=manylinux_2_34_x86_64
+PLAT=manylinux_2_34_$(uname -m)
 PY=/opt/python/cp314-cp314/bin/python
 OUT_DIR=${OUT_DIR:-dist}
+BUILD_SDIST=${BUILD_SDIST:-1}
 CARGO_BIN="${CARGO_HOME:-$HOME/.cargo}/bin"
 
 install_deps() {
@@ -56,7 +62,9 @@ build() {
         -w "$OUT_DIR" "$raw_dir"/mapli-*.whl
     auditwheel show "$OUT_DIR"/mapli-*.whl
 
-    "$PY" -m maturin sdist -o "$OUT_DIR"
+    if [ "$BUILD_SDIST" = "1" ]; then
+        "$PY" -m maturin sdist -o "$OUT_DIR"
+    fi
 
     if [ -n "${HOST_UID:-}" ]; then
         chown -R "$HOST_UID:${HOST_GID:-$HOST_UID}" "$OUT_DIR"

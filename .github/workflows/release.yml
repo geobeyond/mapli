@@ -28,14 +28,20 @@ jobs:
         with:
           sparse-checkout: 'CHANGELOG.md'
           sparse-checkout-cone-mode: 'false'
-      - name: "Download artifact"
+      - name: "Download artifacts"
         uses: actions/download-artifact@v8.0.1
         with:
-          name: ${{ needs.call_run_ci.outputs.artifact_name }}
+          pattern: ${{ needs.call_run_ci.outputs.artifact_pattern }}
+          merge-multiple: true
           path: dist
-      # The version comes from Cargo.toml, so make sure it was bumped to match the tag
-      - name: "Check that the built version matches the tag"
-        run: ls dist/mapli-"${GITHUB_REF_NAME#v}"-*.whl
+      # The version comes from Cargo.toml, so make sure it was bumped to match the tag. Listing each
+      # expected file also makes sure no platform's wheel is missing from the release.
+      - name: "Check that the built version matches the tag and all platforms were built"
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          ls dist/mapli-"$version".tar.gz \
+              dist/mapli-"$version"-*-manylinux_2_34_x86_64.whl \
+              dist/mapli-"$version"-*-manylinux_2_34_aarch64.whl
       - name: "Create GitHub release"
         uses: softprops/action-gh-release@v3.0.3
         with:
