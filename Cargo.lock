@@ -1246,7 +1246,7 @@ dependencies = [
 
 [[package]]
 name = "mapli"
-version = "0.2.1"
+version = "0.3.0-dev.0"
 dependencies = [
  "mapli-core",
  "pyo3",
@@ -1254,7 +1254,7 @@ dependencies = [
 
 [[package]]
 name = "mapli-core"
-version = "0.2.1"
+version = "0.3.0-dev.0"
 dependencies = [
  "crossbeam-channel",
  "image",
