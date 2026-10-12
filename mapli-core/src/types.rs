@@ -69,10 +69,14 @@ pub enum Style {
 /// Map camera, in lon/lat order
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Camera {
+    /// Degrees
     pub lon: f64,
+    /// Degrees
     pub lat: f64,
     pub zoom: f64,
+    /// Degrees clockwise from north
     pub bearing: f64,
+    /// Degrees from straight down, in [0, MAX_PITCH]
     pub pitch: f64,
 }
 
@@ -108,6 +112,7 @@ impl Camera {
         Ok(self)
     }
 
+    /// Initialize with an input pitch, in degrees from straight down; Accepts [0, MAX_PITCH].
     pub fn with_pitch(mut self, pitch: f64) -> Result<Self> {
         self.pitch = validate_pitch(pitch)?;
         Ok(self)
@@ -287,6 +292,7 @@ impl BoundsToFit {
         Ok(self)
     }
 
+    /// Initialize with an input pitch, in degrees from straight down; Accepts [0, MAX_PITCH].
     pub fn with_pitch(mut self, pitch: f64) -> Result<Self> {
         self.pitch = validate_pitch(pitch)?;
         Ok(self)
@@ -384,7 +390,9 @@ impl Hash for PixelRatio {
 /// Output image dimensions
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ImageSpec {
+    /// Logical pixels; the output image is `width * pixel_ratio` pixels wide
     pub width: NonZeroU32,
+    /// Logical pixels; the output image is `height * pixel_ratio` pixels high
     pub height: NonZeroU32,
     pub pixel_ratio: PixelRatio,
 }
@@ -505,6 +513,7 @@ impl StaticRequest {
 pub struct TileRequest {
     pub style: StyleId,
     pub tile: TileCoord,
+    /// Tile edge, in logical pixels; the output image is `tile_size * pixel_ratio` pixels wide
     pub tile_size: NonZeroU32,
     pub pixel_ratio: PixelRatio,
     pub format: OutputFormat,

@@ -43,6 +43,30 @@ class RenderPool:
         pitch: float = 0.0,
         pixel_ratio: float = 1.0,
     ) -> bytes: ...
+    def render_from_bounds(
+        self,
+        style_id: str,
+        *,
+        bbox: tuple[float, float, float, float],
+        width: int,
+        height: int,
+        padding: float = 0.0,
+        bearing: float = 0.0,
+        pitch: float = 0.0,
+        pixel_ratio: float = 1.0,
+    ) -> bytes: ...
+    async def arender_from_bounds(
+        self,
+        style_id: str,
+        *,
+        bbox: tuple[float, float, float, float],
+        width: int,
+        height: int,
+        padding: float = 0.0,
+        bearing: float = 0.0,
+        pitch: float = 0.0,
+        pixel_ratio: float = 1.0,
+    ) -> bytes: ...
     def render_tile(
         self,
         style_id: str,

@@ -50,6 +50,20 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
+Instead of a center and zoom, you can also pass a bounding box. mapli picks the zoom that fits it
+in the image:
+
+```python
+png = pool.render_from_bounds(  # or `await pool.arender_from_bounds(...)`
+    "demo", bbox=(-9.6, 36.9, -6.1, 42.2), width=800, height=600, padding=16
+)
+```
+
+`bbox` is `(west, south, east, north)`, the same order as shapely's `bounds` and geopandas'
+`total_bounds`, which can be passed directly. `padding` is the space, in pixels, to leave around
+the bounds on every side. A `west` greater than `east` means the bounds cross the antimeridian,
+e.g. `bbox=(170, -20, -170, -15)` for Fiji.
+
 ### Tile mode
 
 Besides static images, mapli can render map tiles in the XYZ (WebMercatorQuad) scheme:

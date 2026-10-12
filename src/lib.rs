@@ -13,8 +13,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
 use mapli_core::{
-    Camera, ImageSpec, OutputFormat, PixelRatio, PoolConfig, Rendered, StaticRequest, Style,
-    TileCoord, TileRequest,
+    Bounds, BoundsToFit, Camera, ImageSpec, OutputFormat, PixelRatio, PoolConfig, Rendered,
+    StaticRequest, Style, TileCoord, TileRequest,
 };
 
 // We use the name `mapli` (and not `mapli-core`) for the Python module because users
@@ -124,6 +124,11 @@ impl RenderPool {
         self.inner.has_style(&style_id.into())
     }
 
+    /// Render a static map image to PNG bytes.
+    ///
+    /// `lon` and `lat` are in degrees, `width` and `height` in logical pixels (the image is
+    /// `width * pixel_ratio` by `height * pixel_ratio` pixels). `bearing` is in degrees clockwise
+    /// from north, `pitch` in degrees from straight down (0-60).
     #[pyo3(signature = (
         style_id, *, lon, lat, zoom ,width, height,
         bearing = 0.0, pitch = 0.0, pixel_ratio = 1.0,
@@ -169,9 +174,9 @@ impl RenderPool {
 
     /// Asynchronously render a static map image to PNG bytes.
     ///
-    /// Returns a coroutine that must be awaited inside an asyncio event loop. Nothing is
-    /// submitted to the pool until it is first awaited. Cancelling it skips the render if a
-    /// worker has not picked it up yet.
+    /// Takes the same arguments as `render`. Returns a coroutine that must be awaited inside an
+    /// asyncio event loop. Nothing is submitted to the pool until it is first awaited.
+    /// Cancelling it skips the render if a worker has not picked it up yet.
     #[pyo3(signature = (
         style_id, *, lon, lat, zoom ,width, height,
         bearing = 0.0, pitch = 0.0, pixel_ratio = 1.0,
@@ -204,6 +209,87 @@ impl RenderPool {
 
         // This future is polled on the event loop thread, so it must not do CPU work.
         // The worker already encoded the PNG, which makes `into_png` a no-op here.
+        let png = self
+            .inner
+            .render_async(req)
+            .await
+            .and_then(Rendered::into_png)
+            .map_err(to_py_err)?;
+
+        Ok(Python::attach(|py| PyBytes::new(py, &png).unbind()))
+    }
+
+    /// Render a static map image, fitted to a bounding box, to PNG bytes.
+    ///
+    /// `bbox` is `(west, south, east, north)`, in degrees. The zoom is chosen so that the bounds
+    /// fit in the image, leaving `padding` on every side. `width`, `height` and `padding` are in
+    /// logical pixels, `bearing` and `pitch` in degrees as in `render`. A `west` greater than
+    /// `east` means the bounds cross the antimeridian, so swapped coordinates render most of the
+    /// world rather than raising an error.
+    #[pyo3(signature = (
+        style_id, *, bbox, width, height,
+        padding = 0.0, bearing = 0.0, pitch = 0.0, pixel_ratio = 1.0,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn render_from_bounds<'py>(
+        &self,
+        py: Python<'py>,
+        style_id: &str,
+        bbox: (f64, f64, f64, f64),
+        width: u32,
+        height: u32,
+        padding: f64,
+        bearing: f64,
+        pitch: f64,
+        pixel_ratio: f32,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let req = build_bounds_request(
+            style_id,
+            bbox,
+            width,
+            height,
+            padding,
+            bearing,
+            pitch,
+            pixel_ratio,
+        )
+        .map_err(to_py_err)?;
+        let png = py
+            .detach(|| self.inner.render(req).and_then(Rendered::into_png))
+            .map_err(to_py_err)?;
+        Ok(PyBytes::new(py, &png))
+    }
+
+    /// Asynchronously render a static map image, fitted to a bounding box, to PNG bytes.
+    ///
+    /// Behaves like `arender`: returns a coroutine that submits the request when first awaited.
+    #[pyo3(signature = (
+        style_id, *, bbox, width, height,
+        padding = 0.0, bearing = 0.0, pitch = 0.0, pixel_ratio = 1.0,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    async fn arender_from_bounds(
+        &self,
+        style_id: String,
+        bbox: (f64, f64, f64, f64),
+        width: u32,
+        height: u32,
+        padding: f64,
+        bearing: f64,
+        pitch: f64,
+        pixel_ratio: f32,
+    ) -> PyResult<Py<PyBytes>> {
+        let req = build_bounds_request(
+            &style_id,
+            bbox,
+            width,
+            height,
+            padding,
+            bearing,
+            pitch,
+            pixel_ratio,
+        )
+        .map_err(to_py_err)?;
         let png = self
             .inner
             .render_async(req)
@@ -291,6 +377,33 @@ fn build_static_request(
         spec,
         format: OutputFormat::Png,
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_bounds_request(
+    style_id: &str,
+    (west, south, east, north): (f64, f64, f64, f64),
+    width: u32,
+    height: u32,
+    padding: f64,
+    bearing: f64,
+    pitch: f64,
+    pixel_ratio: f32,
+) -> mapli_core::Result<StaticRequest> {
+    let fit = BoundsToFit::new(Bounds::new(west, south, east, north)?)
+        .with_padding(padding)?
+        .with_bearing(bearing)?
+        .with_pitch(pitch)?;
+    let spec = ImageSpec::new(width, height)?.with_pixel_ratio(PixelRatio::new(pixel_ratio)?);
+    let req = StaticRequest {
+        style: style_id.into(),
+        view: fit.into(),
+        spec,
+        format: OutputFormat::Png,
+    };
+    // check that the padding fits in the image now, while we can still raise a ValueError
+    req.validate()?;
+    Ok(req)
 }
 
 fn build_tile_request(
