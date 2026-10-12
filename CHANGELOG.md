@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [0.3.0] - 2026-10-12
+
 ### Added
 - `RenderPool.render_from_bounds()` and `RenderPool.arender_from_bounds()`, which render static
   images fitted to a bounding box
@@ -17,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - mapli-core: `StaticRequest.camera` was replaced by `StaticRequest.view`, which takes either a
   `Camera` or bounds to fit (`View`)
+
 
 ## [0.2.2] - 2026-10-12
 
@@ -40,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 [unreleased]: https://github.com/ricardogsilva/mapli
+[0.3.0]: https://github.com/ricardogsilva/mapli/releases/tag/v0.3.0
 [0.2.2]: https://github.com/ricardogsilva/mapli/releases/tag/v0.2.2
 [0.2.1]: https://github.com/ricardogsilva/mapli/releases/tag/v0.2.1
 [0.2.0]: https://github.com/ricardogsilva/mapli/releases/tag/v0.2.0
