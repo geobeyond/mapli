@@ -7,20 +7,30 @@ from typing import Any
 
 from . import _core
 from ._core import (
+    ErrorReason,
     GraphicsUnavailableError,
     MapliError,
     RenderError,
+    ResourceRequest,
+    Response,
+    SchemeRegistrationError,
     StyleLoadError,
     UnknownStyleError,
+    register_scheme_handler,
 )
 
 __all__ = [
+    "ErrorReason",
     "GraphicsUnavailableError",
     "MapliError",
     "RenderError",
     "RenderPool",
+    "ResourceRequest",
+    "Response",
+    "SchemeRegistrationError",
     "StyleLoadError",
     "UnknownStyleError",
+    "register_scheme_handler",
 ]
 
 

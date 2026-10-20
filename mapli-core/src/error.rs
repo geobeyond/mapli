@@ -26,7 +26,7 @@ pub enum MapliError {
     StyleLoadFailed { id: StyleId, message: String },
 
     /// MapLibre Native failed while rendering.
-    #[error("render failed")]
+    #[error("render failed: {0}")]
     RenderFailed(String),
 
     /// Encoding to PNG failed.
@@ -40,6 +40,13 @@ pub enum MapliError {
          display (e.g. run under Xvfb); see the README"
     )]
     GraphicsUnavailable(String),
+
+    /// A scheme handler was registered after a render pool was created.
+    #[error(
+        "cannot register a handler for scheme {0:?}: scheme handlers must be registered before \
+         the first render pool is created"
+    )]
+    SchemeRegistrationClosed(String),
 
     /// OS refused to start a worker thread
     #[error("failed to spawn render worker: {0}")]

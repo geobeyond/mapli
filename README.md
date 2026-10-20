@@ -82,6 +82,120 @@ OpenLayers) expect 256 px tiles, which you get with `tile_size=256`. Because Map
 are based on 512 px tiles, a 256 px tile is drawn one zoom level lower, so 256 px tiles cannot be
 rendered at `z=0`. Use `pixel_ratio=2` for high-DPI ("@2x") tiles.
 
+### Custom URL schemes
+
+mapli lets you register a custom Python handler for a URL scheme of your choosing. Styles then
+refer to data with URLs of that scheme, and mapli hands every request for such a URL to the
+handler, which is responsible for returning the data bytes. URLs of other schemes are still
+fetched by MapLibre Native itself, as usual.
+
+This is useful for data that MapLibre Native cannot fetch on its own, such as data in a private
+object store bucket. Styles can thus reference stable URLs for their sources (and be free of secrets)
+As an example, the handler below reads a private S3 bucket with [obstore](https://developmentseed.org/obstore/):
+
+```python
+import mapli
+import obstore
+from obstore.store import S3Store
+
+store = S3Store.from_url("s3://my-private-bucket", region="eu-west-1")
+
+
+def read_from_store(request: mapli.ResourceRequest) -> mapli.Response:
+    key = request.url.removeprefix("store://")
+    options: obstore.GetOptions = {}
+    if request.data_range is not None:
+        start, end = request.data_range
+        options["range"] = (start, end + 1)
+    try:
+        result = obstore.get(store, key, options=options)
+    except FileNotFoundError:
+        return mapli.Response.error(mapli.ErrorReason.NOT_FOUND, f"no object at {key}")
+    return mapli.Response(result.bytes())
+
+
+mapli.register_scheme_handler("store", read_from_store)
+pool = mapli.RenderPool(workers=2)
+pool.register_style(
+    "roads",
+    json={
+        "version": 8,
+        "sources": {
+            # MapLibre Native's PMTiles support reads the archive through the handler
+            "roads": {"type": "vector", "url": "pmtiles://store://tiles/roads.pmtiles"},
+            # other schemes are fetched by MapLibre Native as usual
+            "basemap": {
+                "type": "raster",
+                "url": "https://tiles.example.org/tiles.json",
+            },
+        },
+        "layers": [
+            {"id": "basemap", "type": "raster", "source": "basemap"},
+            {"id": "roads", "type": "line", "source": "roads", "source-layer": "roads"},
+        ],
+    },
+)
+```
+
+A handler is called with a `ResourceRequest` and returns one of:
+
+- `mapli.Response(data)`, or just the `bytes`;
+- `mapli.Response.no_content()`, e.g. for a missing tile, which is drawn as empty;
+- `mapli.Response.error(reason, message)`, which fails the render with a `RenderError` that
+  names the URL, the reason and the message. An exception raised by the handler does the same.
+
+Things to keep in mind:
+
+- Handlers must be registered before the first `RenderPool` is created, because MapLibre Native
+  does not pick up file sources registered later. Registering afterwards raises
+  `SchemeRegistrationError`.
+
+- Schemes that MapLibre Native serves itself (`http`, `https`, `file`, `asset`, `mbtiles`,
+  `pmtiles`) cannot be given a handler. Once any handler is registered, `asset://` URLs no longer
+  work: mapli's handlers take MapLibre Native's asset slot.
+
+- MapLibre Native often makes several identical requests at the same time. While the handler
+  serves one, the identical ones wait for it and get the same response, so the handler is called
+  once. Responses are not cached after that, but each renderer keeps the tiles it has loaded, and
+  MapLibre Native's PMTiles support keeps archive headers and directories. If you also want to
+  avoid reading the same data again across renderers, cache it in the handler (see below).
+
+- Handlers run on threads owned by mapli, so requests are served concurrently as long as the
+  handler waits on I/O that releases the GIL, as obstore, sockets and files do. A request that is
+  no longer needed is skipped if its handler has not started yet. Once started, it runs to the
+  end.
+
+- Values stored in a `threading.local()` do not persist from one handler call to the next, as
+  each call gets a fresh Python thread state. Create clients once and share them across calls,
+  using clients that are safe to share between threads, as obstore's stores are.
+
+To cache, keep the fetching in a function that returns the data and raises on errors, so that
+errors are never cached, and wrap it in e.g. `functools.lru_cache`. This suits objects that never
+change, as PMTiles archives usually don't:
+
+```python
+import functools
+
+
+@functools.lru_cache(maxsize=1024)  # counts entries, not bytes
+def fetch(key: str, data_range: tuple[int, int] | None) -> obstore.Bytes:
+    options: obstore.GetOptions = {}
+    if data_range is not None:
+        start, end = data_range
+        options["range"] = (start, end + 1)
+    return obstore.get(store, key, options=options).bytes()
+
+
+def read_from_store(request: mapli.ResourceRequest) -> mapli.Response:
+    key = request.url.removeprefix("store://")
+    try:
+        return mapli.Response(fetch(key, request.data_range))
+    except FileNotFoundError:
+        return mapli.Response.error(mapli.ErrorReason.NOT_FOUND, f"no object at {key}")
+```
+
+`examples/private-bucket.py` puts this together, and prints what is read from the store.
+
 
 ## System requirements
 

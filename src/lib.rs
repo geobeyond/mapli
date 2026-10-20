@@ -4,17 +4,21 @@
 //! releases the GIL around anything slow, and converts results and errors back. All real logic
 //! is in mapli-core.
 
+use std::mem::ManuallyDrop;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use pyo3::create_exception;
-use pyo3::exceptions::{PyException, PyValueError};
+use pyo3::exceptions::{PyException, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyBytes;
+use pyo3::pybacked::PyBackedBytes;
+use pyo3::types::{PyBytes, PyMemoryView};
 
 use mapli_core::{
     Bounds, BoundsToFit, Camera, ImageSpec, OutputFormat, PixelRatio, PoolConfig, Rendered,
-    StaticRequest, Style, TileCoord, TileRequest,
+    SchemeHandler, SchemeRequest, SchemeResponse, StaticRequest, Style, TileCoord, TileRequest,
 };
 
 // We use the name `mapli` (and not `mapli-core`) for the Python module because users
@@ -49,6 +53,12 @@ create_exception!(
     MapliError,
     "MapLibre Native failed render."
 );
+create_exception!(
+    mapli,
+    SchemeRegistrationError,
+    MapliError,
+    "A scheme handler was registered after the first render pool was created."
+);
 
 fn to_py_err(err: mapli_core::MapliError) -> PyErr {
     use mapli_core::MapliError as E;
@@ -59,6 +69,7 @@ fn to_py_err(err: mapli_core::MapliError) -> PyErr {
         E::StyleLoadFailed { .. } => StyleLoadError::new_err(msg),
         E::RenderFailed(_) | E::PngEncodingFailed(_) => RenderError::new_err(msg),
         E::GraphicsUnavailable(_) => GraphicsUnavailableError::new_err(msg),
+        E::SchemeRegistrationClosed(_) => SchemeRegistrationError::new_err(msg),
         _ => MapliError::new_err(msg),
     }
 }
@@ -73,7 +84,18 @@ fn to_py_err(err: mapli_core::MapliError) -> PyErr {
 /// testing, etc.
 #[pyclass(frozen, subclass, module = "mapli._core")]
 struct RenderPool {
-    inner: mapli_core::RenderPool,
+    /// Dropped by hand, see `Drop`
+    inner: ManuallyDrop<mapli_core::RenderPool>,
+}
+
+impl Drop for RenderPool {
+    /// Dropping the pool joins its workers, and a worker may be waiting on a scheme handler,
+    /// which needs the GIL to run: release the GIL while joining, or both would wait forever.
+    fn drop(&mut self) {
+        // SAFETY: `inner` is not used again after being taken here
+        let inner = unsafe { ManuallyDrop::take(&mut self.inner) };
+        Python::attach(|py| py.detach(move || drop(inner)));
+    }
 }
 
 #[pymethods]
@@ -90,7 +112,9 @@ impl RenderPool {
             max_renderers_per_worker,
         })
         .map_err(to_py_err)?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner: ManuallyDrop::new(inner),
+        })
     }
 
     /// Register a style with the pool under `style_id`. Pass exactly one of `url`, `path` or `json`
@@ -425,17 +449,222 @@ fn build_tile_request(
     })
 }
 
+/// A request that MapLibre Native makes for a URL of a registered scheme.
+#[pyclass(frozen, module = "mapli._core")]
+struct ResourceRequest {
+    /// The full URL, including the scheme
+    #[pyo3(get)]
+    url: String,
+    /// What is being requested: "style", "source", "tile", "glyphs", "sprite_image",
+    /// "sprite_json", "image" or "unknown". PMTiles reads are "source" requests.
+    #[pyo3(get)]
+    kind: &'static str,
+    /// Inclusive `(start, end)` byte range for partial reads, as PMTiles makes, else `None`
+    #[pyo3(get)]
+    data_range: Option<(u64, u64)>,
+}
+
+#[pymethods]
+impl ResourceRequest {
+    fn __repr__(&self) -> String {
+        let data_range = match self.data_range {
+            Some((start, end)) => format!("({start}, {end})"),
+            None => "None".to_string(),
+        };
+        format!(
+            "ResourceRequest(url={:?}, kind={:?}, data_range={data_range})",
+            self.url, self.kind
+        )
+    }
+}
+
+impl From<&SchemeRequest> for ResourceRequest {
+    fn from(req: &SchemeRequest) -> Self {
+        Self {
+            url: req.url.clone(),
+            kind: req.kind.as_str(),
+            data_range: req.data_range,
+        }
+    }
+}
+
+/// Why a scheme handler failed to serve a request.
+#[pyclass(eq, eq_int, frozen, from_py_object, module = "mapli._core")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ErrorReason {
+    #[pyo3(name = "NOT_FOUND")]
+    NotFound,
+    #[pyo3(name = "SERVER")]
+    Server,
+    #[pyo3(name = "CONNECTION")]
+    Connection,
+    #[pyo3(name = "RATE_LIMIT")]
+    RateLimit,
+    #[pyo3(name = "OTHER")]
+    Other,
+}
+
+impl From<ErrorReason> for mapli_core::ErrorReason {
+    fn from(reason: ErrorReason) -> Self {
+        match reason {
+            ErrorReason::NotFound => Self::NotFound,
+            ErrorReason::Server => Self::Server,
+            ErrorReason::Connection => Self::Connection,
+            ErrorReason::RateLimit => Self::RateLimit,
+            ErrorReason::Other => Self::Other,
+        }
+    }
+}
+
+/// What a scheme handler answers a request with: data, no content or an error.
+#[pyclass(frozen, module = "mapli._core")]
+struct Response {
+    inner: SchemeResponse,
+}
+
+#[pymethods]
+impl Response {
+    /// A successful response carrying `data`, which can be any bytes-like object.
+    #[new]
+    fn new(data: &Bound<'_, PyAny>) -> PyResult<Self> {
+        Ok(Self {
+            inner: SchemeResponse::Data(extract_data(data)?),
+        })
+    }
+
+    /// A successful, empty response, e.g. for a missing tile, which is drawn as empty instead
+    /// of failing the render.
+    #[staticmethod]
+    fn no_content() -> Self {
+        Self {
+            inner: SchemeResponse::NoContent,
+        }
+    }
+
+    /// A failed response, which fails the render. `retry_after` is in seconds from now, for
+    /// rate limited requests.
+    #[staticmethod]
+    #[pyo3(signature = (reason, message, *, retry_after = None))]
+    fn error(reason: ErrorReason, message: String, retry_after: Option<f64>) -> PyResult<Self> {
+        let retry_after = retry_after
+            .map(|seconds| {
+                Duration::try_from_secs_f64(seconds)
+                    .map(|delay| SystemTime::now() + delay)
+                    .map_err(|_| {
+                        PyValueError::new_err(format!(
+                            "retry_after {seconds} must be finite and >= 0"
+                        ))
+                    })
+            })
+            .transpose()?;
+        Ok(Self {
+            inner: SchemeResponse::Error {
+                reason: reason.into(),
+                message,
+                retry_after,
+            },
+        })
+    }
+
+    fn __repr__(&self) -> String {
+        match &self.inner {
+            SchemeResponse::Data(data) => format!("Response(<{} bytes>)", data.len()),
+            SchemeResponse::NoContent => "Response.no_content()".to_string(),
+            SchemeResponse::Error {
+                reason, message, ..
+            } => format!("Response.error({reason:?}, {message:?})"),
+        }
+    }
+}
+
+/// A Python callable serving the requests of a scheme.
+struct PyHandler(Py<PyAny>);
+
+impl SchemeHandler for PyHandler {
+    fn handle(&self, request: &SchemeRequest) -> SchemeResponse {
+        // fails if the interpreter is shutting down, in which case there is nothing to call
+        Python::try_attach(
+            |py| match self.0.call1(py, (ResourceRequest::from(request),)) {
+                Ok(returned) => to_scheme_response(returned.bind(py)),
+                Err(err) => SchemeResponse::error(
+                    mapli_core::ErrorReason::Other,
+                    format!("handler raised {err}"),
+                ),
+            },
+        )
+        .unwrap_or_else(|| {
+            SchemeResponse::error(
+                mapli_core::ErrorReason::Other,
+                "the Python interpreter is not available",
+            )
+        })
+    }
+}
+
+/// Copy the bytes out of `data`, which can be any object supporting the buffer protocol, such as
+/// `bytes`, `bytearray`, `memoryview` or obstore's `Bytes`.
+///
+/// pyo3 only reads arbitrary buffers directly under the abi3 build of Python >= 3.11, so others
+/// go through `memoryview(data).tobytes()`, at the cost of an extra copy.
+fn extract_data(data: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
+    if let Ok(data) = data.extract::<PyBackedBytes>() {
+        return Ok(data.to_vec());
+    }
+    let bytes = PyMemoryView::from(data)?.call_method0("tobytes")?;
+    Ok(bytes.cast::<PyBytes>()?.as_bytes().to_vec())
+}
+
+/// Accept a `Response`, or a bytes-like object as a shortcut for `Response(data)`.
+fn to_scheme_response(returned: &Bound<'_, PyAny>) -> SchemeResponse {
+    if let Ok(response) = returned.cast::<Response>() {
+        return response.get().inner.clone();
+    }
+    if let Ok(data) = extract_data(returned) {
+        return SchemeResponse::Data(data);
+    }
+    let type_name = returned
+        .get_type()
+        .name()
+        .map_or_else(|_| "?".to_string(), |name| name.to_string());
+    SchemeResponse::error(
+        mapli_core::ErrorReason::Other,
+        format!("handler returned {type_name}, expected Response or a bytes-like object"),
+    )
+}
+
+/// Register `handler` for the URLs of `scheme`, process-wide.
+///
+/// `handler` is called with a `ResourceRequest` and returns a `Response`, or `bytes`. It runs
+/// on a thread owned by mapli. Handlers must be registered before the first `RenderPool` is
+/// created. Schemes served by MapLibre Native itself cannot be given a handler.
+#[pyfunction]
+fn register_scheme_handler(scheme: &str, handler: Bound<'_, PyAny>) -> PyResult<()> {
+    if !handler.is_callable() {
+        return Err(PyTypeError::new_err("handler must be callable"));
+    }
+    mapli_core::register_scheme_handler(scheme, Arc::new(PyHandler(handler.unbind())))
+        .map_err(to_py_err)
+}
+
 /// The function name must match the last segment of `module-name` in the pyproject.toml file
 /// and also the `lib[name] in Cargo.toml.
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<RenderPool>()?;
+    m.add_class::<ResourceRequest>()?;
+    m.add_class::<Response>()?;
+    m.add_class::<ErrorReason>()?;
+    m.add_function(wrap_pyfunction!(register_scheme_handler, m)?)?;
 
     let py = m.py();
     m.add("MapliError", py.get_type::<MapliError>())?;
     m.add("UnknownStyleError", py.get_type::<UnknownStyleError>())?;
     m.add("StyleLoadError", py.get_type::<StyleLoadError>())?;
     m.add("RenderError", py.get_type::<RenderError>())?;
+    m.add(
+        "SchemeRegistrationError",
+        py.get_type::<SchemeRegistrationError>(),
+    )?;
     m.add(
         "GraphicsUnavailableError",
         py.get_type::<GraphicsUnavailableError>(),
