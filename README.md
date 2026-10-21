@@ -159,6 +159,14 @@ A handler is called with a `ResourceRequest` and returns one of:
   made from then on are affected: tiles that renderers have already loaded, and the PMTiles 
   headers and directories that MapLibre Native keeps, are not fetched again.
 
+- Replacing a handler is not expected to be a common use case, so mapli provides no way to
+  discard data that has already been loaded through a scheme. That data is cached in two places,
+  both keyed by URL: each renderer keeps the tiles it has loaded, and MapLibre Native's PMTiles
+  support keeps the header, metadata and directories of each archive it has read. mapli has no
+  access to the latter cache. To make renderers fetch fresh data, refer to it with a new URL,
+  for example by adding a version to the path (`pmtiles://store://v2/tiles/roads.pmtiles`) and
+  having the handler remove the version before reading the data.
+
 - mapli's implementation hijacks MapLibre Native's builtin handling of the `asset` scheme. This 
   means that once a `RenderPool` has been created, mapli does not support MapLibre's `asset`
   scheme, which is usually only useful on mobile platforms anyway.
