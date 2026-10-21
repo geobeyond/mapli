@@ -1,7 +1,7 @@
 //! End-to-end rendering of resources served by a custom URL scheme handler.
 //!
-//! Scheme handler registration is process-global and closes once a pool is created, so the
-//! steps that depend on that order run in a single test.
+//! Scheme handler registration is process-global, so the steps that register, replace and
+//! unregister handlers run in a single test.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use mapli_core::{
     Camera, ErrorReason, ImageSpec, MapliError, OutputFormat, PoolConfig, RenderPool, Rendered,
     RgbaImage, SchemeHandler, SchemeRequest, SchemeResponse, StaticRequest, Style,
-    register_scheme_handler,
+    register_scheme_handler, unregister_scheme_handler,
 };
 
 const RED: [u8; 4] = [255, 0, 0, 255];
@@ -63,7 +63,10 @@ fn render(pool: &RenderPool, style: &str) -> mapli_core::Result<RgbaImage> {
 }
 
 #[test]
-fn scheme_handler_serves_style_and_sources() {
+fn scheme_handlers_can_change_while_pools_exist() {
+    // handlers are registered after the pool is created
+    let pool = RenderPool::new(PoolConfig::default()).unwrap();
+
     // reserved and malformed schemes are refused
     for scheme in ["https", "PMTiles", "", "1mem"] {
         let result = register_scheme_handler(scheme, Arc::new(MemoryHandler::default()));
@@ -84,8 +87,6 @@ fn scheme_handler_serves_style_and_sources() {
         ..Default::default()
     });
     register_scheme_handler("MEM", handler.clone()).unwrap();
-
-    let pool = RenderPool::new(PoolConfig::default()).unwrap();
 
     // the style and its source both come from the handler
     pool.register_style("box", Style::Url("mem://style.json".parse().unwrap()));
@@ -109,7 +110,41 @@ fn scheme_handler_serves_style_and_sources() {
         assert!(detail.contains(expected), "{expected:?} not in {detail:?}");
     }
 
-    // registration is closed once a pool exists
-    let result = register_scheme_handler("late", Arc::new(MemoryHandler::default()));
-    assert!(matches!(result, Err(MapliError::SchemeRegistrationClosed(s)) if s == "late"));
+    // a replacement handler serves the requests made from then on
+    let replacement = Arc::new(MemoryHandler {
+        resources: HashMap::from([("mem://other.geojson".to_string(), BOX.as_bytes().to_vec())]),
+        ..Default::default()
+    });
+    register_scheme_handler("mem", replacement.clone()).unwrap();
+    pool.register_style("other", Style::Json(style_json("mem://other.geojson")));
+    let img = render(&pool, "other").unwrap();
+    assert_eq!(img.get_pixel(32, 32).0, RED);
+    let served_by = |h: &MemoryHandler| {
+        h.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r.url == "mem://other.geojson")
+    };
+    assert!(served_by(&replacement));
+    assert!(!served_by(&handler));
+
+    // once unregistered, the scheme's URLs are no longer served
+    unregister_scheme_handler("mem").unwrap();
+    pool.register_style("gone", Style::Json(style_json("mem://gone.geojson")));
+    let result = render(&pool, "gone");
+    assert!(
+        matches!(result, Err(MapliError::RenderFailed(_))),
+        "{result:?}"
+    );
+    assert!(
+        !replacement
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r.url == "mem://gone.geojson")
+    );
+    let result = unregister_scheme_handler("mem");
+    assert!(matches!(result, Err(MapliError::UnknownScheme(s)) if s == "mem"));
 }

@@ -19,8 +19,8 @@ from ._core import (
     MapliError,
     RenderError,
     Response,
-    SchemeRegistrationError,
     StyleLoadError,
+    UnknownSchemeError,
     UnknownStyleError,
 )
 
@@ -37,10 +37,11 @@ __all__ = [
     "ResourceRequest",
     "Response",
     "SchemeHandlerProtocol",
-    "SchemeRegistrationError",
     "StyleLoadError",
+    "UnknownSchemeError",
     "UnknownStyleError",
     "register_scheme_handler",
+    "unregister_scheme_handler",
 ]
 
 
@@ -96,8 +97,11 @@ def register_scheme_handler(scheme: str, handler: SchemeHandlerProtocol) -> None
     """Register `handler` for the URLs of `scheme`, process-wide.
 
     `handler` is called with a `ResourceRequest` and returns a `Response`, or `bytes`. It runs
-    on a thread owned by mapli. Handlers must be registered before the first `RenderPool` is
-    created. Schemes served by MapLibre Native itself cannot be given a handler.
+    on a thread owned by mapli. Handlers can be registered at any time, before or after render
+    pools are created, and registering a scheme again replaces its handler for the requests made
+    from then on. Data that renderers have already loaded is not fetched again.
+
+    Note that schemes served by MapLibre Native itself cannot be overridden with a different handler.
     """
     if not callable(handler):
         raise TypeError("handler must be callable")
@@ -112,6 +116,15 @@ def register_scheme_handler(scheme: str, handler: SchemeHandlerProtocol) -> None
         )
 
     _core.register_scheme_handler(scheme, inner_handler)
+
+
+def unregister_scheme_handler(scheme: str) -> None:
+    """Remove the handler of `scheme`, process-wide.
+
+    Requests made from then on are no longer served by the handler, while the ones it is already
+    serving complete. Raises `UnknownSchemeError` if `scheme` has no handler.
+    """
+    _core.unregister_scheme_handler(scheme)
 
 
 class RenderPool(_core.RenderPool):

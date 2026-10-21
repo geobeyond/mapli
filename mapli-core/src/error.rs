@@ -41,12 +41,9 @@ pub enum MapliError {
     )]
     GraphicsUnavailable(String),
 
-    /// A scheme handler was registered after a render pool was created.
-    #[error(
-        "cannot register a handler for scheme {0:?}: scheme handlers must be registered before \
-         the first render pool is created"
-    )]
-    SchemeRegistrationClosed(String),
+    /// No handler is registered for this scheme.
+    #[error("no handler is registered for scheme {0:?}")]
+    UnknownScheme(String),
 
     /// OS refused to start a worker thread
     #[error("failed to spawn render worker: {0}")]

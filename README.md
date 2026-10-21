@@ -153,13 +153,15 @@ A handler is called with a `ResourceRequest` and returns one of:
 
 **Notes:**
 
-- Handlers must be registered before the first `RenderPool` is created. MapLibre Native
-  does not pick up file sources registered later. Registering afterwards raises
-  `SchemeRegistrationError`.
+- Handlers are process-wide, and can be registered at any time, before or after render pools
+  are created. Registering a scheme again replaces its handler, and
+  `mapli.unregister_scheme_handler(scheme)` removes it. Either way, only the requests 
+  made from then on are affected: tiles that renderers have already loaded, and the PMTiles 
+  headers and directories that MapLibre Native keeps, are not fetched again.
 
 - mapli's implementation hijacks MapLibre Native's builtin handling of the `asset` scheme. This 
-  means that mapli does not support MapLibre's `asset` scheme, which is usually useful on 
-  mobile platforms
+  means that once a `RenderPool` has been created, mapli does not support MapLibre's `asset`
+  scheme, which is usually only useful on mobile platforms anyway.
 
 - Schemes that MapLibre Native serves itself (`http`, `https`, `file`, `mbtiles`, `pmtiles`) 
   cannot be given a handler.

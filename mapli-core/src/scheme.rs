@@ -8,11 +8,16 @@
 //! All handlers are served by a single dispatcher, registered in MapLibre Native's `Asset` file
 //! source slot. MapLibre Native asks that slot before any other, and the dispatcher only claims
 //! the URLs of registered schemes, so everything else falls through to the default sources. The
-//! cost is that `asset://` URLs are no longer served once a handler is registered.
+//! cost is that `asset://` URLs are not served once a [`RenderPool`](crate::RenderPool) has been
+//! created, whether or not a handler is registered.
 //!
-//! Registration is process-global, like MapLibre Native's own file source registration, and is
-//! refused once a [`RenderPool`](crate::RenderPool) has been created: MapLibre Native does not
-//! update file sources it has already created.
+//! MapLibre Native only takes the dispatcher into account if it is registered before the first
+//! renderer is created, so creating a pool installs it. After that, MapLibre Native asks the
+//! dispatcher about every request, and the dispatcher looks the handler up each time, so
+//! handlers can be registered, replaced and unregistered at any time. Registration is
+//! process-global, like MapLibre Native's own file source registration. Data that renderers or
+//! MapLibre Native's PMTiles support have already loaded is not fetched again when a handler is
+//! replaced.
 //!
 //! Handlers never run on MapLibre Native's threads. Requests are queued to a pool of handler
 //! threads owned by this module, and their responses are delivered from there.
@@ -26,7 +31,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::sync::{Arc, Mutex, Once, OnceLock, RwLock};
 
 use crossbeam_channel::{Receiver, Sender};
 use maplibre_native::file_source::{ErrorReason as MlnErrorReason, Response};
@@ -55,36 +60,57 @@ pub trait SchemeHandler: Send + Sync + 'static {
 
 /// Register `handler` for the URLs of `scheme`, process-wide.
 ///
-/// Must be called before the first [`RenderPool`](crate::RenderPool) is created. Registering an
-/// already registered scheme replaces its handler. Schemes are case-insensitive.
+/// Can be called at any time, before or after render pools are created. Registering an already
+/// registered scheme replaces its handler, for the requests made from then on. Schemes are
+/// case-insensitive.
 pub fn register_scheme_handler(scheme: &str, handler: Arc<dyn SchemeHandler>) -> Result<()> {
     let scheme = validate_scheme(scheme)?;
-
-    // held for the whole registration, so that a pool cannot be created halfway through it
-    let pool_created = POOL_CREATED.lock().unwrap_or_else(|p| p.into_inner());
-    if *pool_created {
-        return Err(MapliError::SchemeRegistrationClosed(scheme));
-    }
-
-    let dispatch = match DISPATCH.get() {
-        Some(dispatch) => dispatch,
-        None => {
-            let dispatch = Dispatch::start()?;
-            // no race: setting only happens here, while holding the `POOL_CREATED` lock
-            let dispatch = DISPATCH.get_or_init(|| dispatch);
-            register_file_source(FileSourceType::Asset, Dispatcher);
-            dispatch
-        }
-    };
-    let mut handlers = dispatch.handlers.write().unwrap_or_else(|p| p.into_inner());
+    install_dispatcher();
+    let mut handlers = dispatch()?
+        .handlers
+        .write()
+        .unwrap_or_else(|p| p.into_inner());
     handlers.insert(scheme, handler);
     Ok(())
 }
 
-/// Close registration. Called when a render pool is created, as MapLibre Native would not pick
-/// up file sources registered after that.
-pub(crate) fn mark_pool_created() {
-    *POOL_CREATED.lock().unwrap_or_else(|p| p.into_inner()) = true;
+/// Remove the handler of `scheme`, process-wide.
+///
+/// Requests made from then on are no longer served by the handler, while the ones it is already
+/// serving complete. Returns [`MapliError::UnknownScheme`] if `scheme` has no handler.
+pub fn unregister_scheme_handler(scheme: &str) -> Result<()> {
+    let scheme = validate_scheme(scheme)?;
+    let removed = DISPATCH.get().and_then(|dispatch| {
+        let mut handlers = dispatch.handlers.write().unwrap_or_else(|p| p.into_inner());
+        handlers.remove(&scheme)
+    });
+    match removed {
+        Some(_) => Ok(()),
+        None => Err(MapliError::UnknownScheme(scheme)),
+    }
+}
+
+/// Register the dispatcher with MapLibre Native, once per process.
+///
+/// MapLibre Native only uses file sources registered before its first renderer is created, so
+/// this is called when a render pool is created, whether or not handlers are registered yet.
+pub(crate) fn install_dispatcher() {
+    static INSTALL: Once = Once::new();
+    INSTALL.call_once(|| register_file_source(FileSourceType::Asset, Dispatcher));
+}
+
+/// The registered handlers, starting the handler threads on first use.
+fn dispatch() -> Result<&'static Dispatch> {
+    if let Some(dispatch) = DISPATCH.get() {
+        return Ok(dispatch);
+    }
+    // only one caller starts the handler threads, even if several register at once
+    let _starting = DISPATCH_START.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(dispatch) = DISPATCH.get() {
+        return Ok(dispatch);
+    }
+    let dispatch = Dispatch::start()?;
+    Ok(DISPATCH.get_or_init(|| dispatch))
 }
 
 /// Check that `scheme` is a valid URI scheme (RFC 3986, section 3.1) which is not reserved, and
@@ -114,7 +140,7 @@ fn scheme_of(url: &str) -> Option<String> {
         .map(|(scheme, _)| scheme.to_ascii_lowercase())
 }
 
-static POOL_CREATED: Mutex<bool> = Mutex::new(false);
+static DISPATCH_START: Mutex<()> = Mutex::new(());
 static DISPATCH: OnceLock<Dispatch> = OnceLock::new();
 
 /// Registered handlers, the queue to the handler threads and the requests being served.
@@ -124,8 +150,17 @@ struct Dispatch {
     in_flight: InFlight<RequestKey, Waiter>,
 }
 
-/// Requests with the same key get the same response.
-type RequestKey = (String, Option<(u64, u64)>);
+/// Requests with the same key get the same response: the URL, the byte range and the handler,
+/// so that a request made after its scheme's handler was replaced does not get the response of
+/// the previous one.
+type RequestKey = (String, Option<(u64, u64)>, HandlerId);
+
+/// Identifies a handler by its address, which cannot be reused while a job holds the handler.
+type HandlerId = usize;
+
+fn handler_id(handler: &Arc<dyn SchemeHandler>) -> HandlerId {
+    Arc::as_ptr(handler).cast::<()>() as usize
+}
 
 impl Dispatch {
     fn start() -> Result<Self> {
@@ -265,7 +300,11 @@ impl FileSource for Dispatcher {
         };
 
         let request = SchemeRequest::from_mln(&request);
-        let key = (request.url.clone(), request.data_range);
+        let key = (
+            request.url.clone(),
+            request.data_range,
+            handler_id(&handler),
+        );
         let cancelled = Arc::new(AtomicBool::new(false));
         let waiter = Waiter {
             responder,
@@ -317,6 +356,18 @@ mod tests {
         for scheme in RESERVED_SCHEMES.iter().copied().chain(["HTTPS", "PMTiles"]) {
             assert!(validate_scheme(scheme).is_err(), "{scheme:?} was accepted");
         }
+    }
+
+    #[test]
+    fn unregistering_an_invalid_scheme_is_refused() {
+        assert!(matches!(
+            unregister_scheme_handler("1store"),
+            Err(MapliError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            unregister_scheme_handler("https"),
+            Err(MapliError::InvalidInput(_))
+        ));
     }
 
     #[test]

@@ -1,45 +1,11 @@
 import json
 import struct
-from collections.abc import (
-    Callable,
-    Iterator,
-)
-
-import pytest
+from collections.abc import Callable
 
 import mapli
 
-# Handlers in the tests return `object`, as some return invalid values on purpose
+# a handler that may return anything, as some tests return invalid values on purpose
 Handler = Callable[[mapli.ResourceRequest], object]
-SetMemoryHandler = Callable[[Handler], None]
-
-# the handler of the running test for `memory://` URLs, set with the `memory_handler` fixture
-_handler: Handler | None = None
-
-
-def _forward(request: mapli.ResourceRequest) -> object:
-    if _handler is None:
-        return mapli.Response.error(mapli.ErrorReason.NOT_FOUND, "no handler set")
-    return _handler(request)
-
-
-# Scheme handlers can only be registered before the first render pool exists, so tests cannot
-# register their own. Instead, this one is registered on import, before any test runs, and
-# forwards every request to the handler that the running test set
-mapli.register_scheme_handler("memory", _forward)  # ty: ignore[invalid-argument-type]
-
-
-@pytest.fixture
-def memory_handler() -> Iterator[SetMemoryHandler]:
-    """Set the handler for `memory://` URLs during the test."""
-    global _handler
-
-    def set_handler(handler: Handler) -> None:
-        global _handler
-        _handler = handler
-
-    yield set_handler
-    _handler = None
 
 
 def pmtiles_handler(archive: bytes) -> Callable[[mapli.ResourceRequest], bytes]:

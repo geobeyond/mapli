@@ -76,8 +76,9 @@ impl RenderPool {
         #[cfg(target_os = "linux")]
         crate::egl::check()?;
 
-        // MapLibre Native would not pick up scheme handlers registered from now on
-        crate::scheme::mark_pool_created();
+        // MapLibre Native only uses the scheme handlers' dispatcher if it is registered before
+        // the first renderer is created
+        crate::scheme::install_dispatcher();
 
         // a shared multi-consumer queue: idle workers pull the next command from it
         let (tx, rx) = crossbeam_channel::unbounded::<Command>();

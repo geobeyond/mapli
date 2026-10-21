@@ -55,9 +55,9 @@ create_exception!(
 );
 create_exception!(
     mapli,
-    SchemeRegistrationError,
+    UnknownSchemeError,
     MapliError,
-    "A scheme handler was registered after the first render pool was created."
+    "No scheme handler is registered for the scheme"
 );
 
 fn to_py_err(err: mapli_core::MapliError) -> PyErr {
@@ -69,7 +69,7 @@ fn to_py_err(err: mapli_core::MapliError) -> PyErr {
         E::StyleLoadFailed { .. } => StyleLoadError::new_err(msg),
         E::RenderFailed(_) | E::PngEncodingFailed(_) => RenderError::new_err(msg),
         E::GraphicsUnavailable(_) => GraphicsUnavailableError::new_err(msg),
-        E::SchemeRegistrationClosed(_) => SchemeRegistrationError::new_err(msg),
+        E::UnknownScheme(_) => UnknownSchemeError::new_err(msg),
         _ => MapliError::new_err(msg),
     }
 }
@@ -638,8 +638,8 @@ fn to_scheme_response(returned: &Bound<'_, PyAny>) -> SchemeResponse {
 /// Register `handler` for the URLs of `scheme`, process-wide.
 ///
 /// `handler` is called with a `RawResourceRequest` and returns a `Response`, or `bytes`. It runs
-/// on a thread owned by mapli. Handlers must be registered before the first `RenderPool` is
-/// created. Schemes served by MapLibre Native itself cannot be given a handler.
+/// on a thread owned by mapli. Handlers can be registered at any time, and registering a scheme
+/// again replaces its handler. Schemes served by MapLibre Native itself cannot be given a handler.
 #[pyfunction]
 fn register_scheme_handler(scheme: &str, handler: Bound<'_, PyAny>) -> PyResult<()> {
     if !handler.is_callable() {
@@ -647,6 +647,14 @@ fn register_scheme_handler(scheme: &str, handler: Bound<'_, PyAny>) -> PyResult<
     }
     mapli_core::register_scheme_handler(scheme, Arc::new(PyHandler(handler.unbind())))
         .map_err(to_py_err)
+}
+
+/// Remove the handler of `scheme`, process-wide.
+///
+/// Raises `UnknownSchemeError` if `scheme` has no handler.
+#[pyfunction]
+fn unregister_scheme_handler(scheme: &str) -> PyResult<()> {
+    mapli_core::unregister_scheme_handler(scheme).map_err(to_py_err)
 }
 
 /// The function name must match the last segment of `module-name` in the pyproject.toml file
@@ -658,16 +666,14 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Response>()?;
     m.add_class::<ErrorReason>()?;
     m.add_function(wrap_pyfunction!(register_scheme_handler, m)?)?;
+    m.add_function(wrap_pyfunction!(unregister_scheme_handler, m)?)?;
 
     let py = m.py();
     m.add("MapliError", py.get_type::<MapliError>())?;
     m.add("UnknownStyleError", py.get_type::<UnknownStyleError>())?;
     m.add("StyleLoadError", py.get_type::<StyleLoadError>())?;
     m.add("RenderError", py.get_type::<RenderError>())?;
-    m.add(
-        "SchemeRegistrationError",
-        py.get_type::<SchemeRegistrationError>(),
-    )?;
+    m.add("UnknownSchemeError", py.get_type::<UnknownSchemeError>())?;
     m.add(
         "GraphicsUnavailableError",
         py.get_type::<GraphicsUnavailableError>(),

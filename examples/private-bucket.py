@@ -223,7 +223,7 @@ def main() -> None:
     print(f"archive header: {header | {'metadata': '...'}}")
 
     handler = StoreHandler(store, args.cache_size)
-    # Process-wide, and must happen before the first render pool is created
+    # Process-wide: every render pool sends the requests for `store://` URLs to this handler
     mapli.register_scheme_handler(scheme=handler.CUSTOM_SCHEME, handler=handler)
 
     style_id = "default_style"
