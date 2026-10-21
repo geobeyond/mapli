@@ -84,13 +84,18 @@ rendered at `z=0`. Use `pixel_ratio=2` for high-DPI ("@2x") tiles.
 
 ### Custom URL schemes
 
-mapli lets you register a custom Python handler for a URL scheme of your choosing. Styles then
-refer to data with URLs of that scheme, and mapli hands every request for such a URL to the
-handler, which is responsible for returning the data bytes. URLs of other schemes are still
+mapli lets you register a custom Python handler for a URL scheme of your choosing. You can then 
+refer to data with URLs of that scheme, and mapli hands every request that uses the scheme to the
+handler, which becomes responsible for returning the data bytes. URLs of other schemes are still
 fetched by MapLibre Native itself, as usual.
 
 This is useful for data that MapLibre Native cannot fetch on its own, such as data in a private
-object store bucket. Styles can thus reference stable URLs for their sources (and be free of secrets)
+object store bucket. 
+
+<details>
+
+<summary>Using a custom URL scheme for fetching S3 private data</summary>
+
 As an example, the handler below reads a private S3 bucket with [obstore](https://developmentseed.org/obstore/):
 
 ```python
@@ -137,48 +142,68 @@ pool.register_style(
 )
 ```
 
+</details>
+
+
 A handler is called with a `ResourceRequest` and returns one of:
 
 - `mapli.Response(data)`, or just the `bytes`;
 - `mapli.Response.no_content()`, e.g. for a missing tile, which is drawn as empty;
-- `mapli.Response.error(reason, message)`, which fails the render with a `RenderError` that
-  names the URL, the reason and the message. An exception raised by the handler does the same.
+- `mapli.Response.error(reason, message)`, which fails the render with a `RenderError`
 
-Things to keep in mind:
+**Notes:**
 
-- Handlers must be registered before the first `RenderPool` is created, because MapLibre Native
+- Handlers must be registered before the first `RenderPool` is created. MapLibre Native
   does not pick up file sources registered later. Registering afterwards raises
   `SchemeRegistrationError`.
 
-- Schemes that MapLibre Native serves itself (`http`, `https`, `file`, `asset`, `mbtiles`,
-  `pmtiles`) cannot be given a handler. Once any handler is registered, `asset://` URLs no longer
-  work: mapli's handlers take MapLibre Native's asset slot.
+- mapli's implementation hijacks MapLibre Native's builtin handling of the `asset` scheme. This 
+  means that mapli does not support MapLibre's `asset` scheme, which is usually useful on 
+  mobile platforms
 
-- MapLibre Native often makes several identical requests at the same time. While the handler
-  serves one, the identical ones wait for it and get the same response, so the handler is called
-  once. Responses are not cached after that, but each renderer keeps the tiles it has loaded, and
-  MapLibre Native's PMTiles support keeps archive headers and directories. If you also want to
-  avoid reading the same data again across renderers, cache it in the handler (see below).
+- Schemes that MapLibre Native serves itself (`http`, `https`, `file`, `mbtiles`, `pmtiles`) 
+  cannot be given a handler.
 
-- Handlers run on threads owned by mapli, so requests are served concurrently as long as the
-  handler waits on I/O that releases the GIL, as obstore, sockets and files do. A request that is
-  no longer needed is skipped if its handler has not started yet. Once started, it runs to the
-  end.
+- MapLibre Native often makes several identical requests at the same time. While your handler
+  is serving one, other identical requests wait for it and get the same response, which 
+  means the handler is only called once. Note that mapli does not cache responses after that. 
+  However, since each renderer keeps the tiles it has loaded, and MapLibre Native's PMTiles 
+  support keeps archive headers and directories there is some degree of caching, but not a 
+  full caching implementation.
+  
+  If you also want to avoid reading the same data again across renderers, you will need to 
+  cache it in the handler (see below for an example).
+
+- Handlers run on threads owned by mapli. This means that requests can be served concurrently if 
+  the handler's I/O is able to release the Python GIL - obstore, sockets and files do this. 
+  
+- A request that is no longer needed is skipped if its handler has not started yet, but once 
+  started, it runs to the end.
 
 - Values stored in a `threading.local()` do not persist from one handler call to the next, as
-  each call gets a fresh Python thread state. Create clients once and share them across calls,
-  using clients that are safe to share between threads, as obstore's stores are.
+  each call gets a fresh Python thread state. This means that if your handler is not thread-safe 
+  then you cannot share state between sucessive handler calls. Ensure whatever clients your 
+  handler uses are thread-safe so that they can be shared - obstore is a good example. 
+
+<details>
+
+<summary>Caching example</summary>
 
 To cache, keep the fetching in a function that returns the data and raises on errors, so that
 errors are never cached, and wrap it in e.g. `functools.lru_cache`. This suits objects that never
 change, as PMTiles archives usually don't:
 
 ```python
-import functools
+from functools import lru_cache
+import obstore
+import mapli
+from obstore.store import S3Store
+
+store = S3Store.from_url("s3://my-private-bucket", region="eu-west-1")
 
 
-@functools.lru_cache(maxsize=1024)  # counts entries, not bytes
-def fetch(key: str, data_range: tuple[int, int] | None) -> obstore.Bytes:
+@lru_cache(maxsize=1024)
+def read_data(key: str, data_range: tuple[int, int] | None) -> obstore.Bytes:
     options: obstore.GetOptions = {}
     if data_range is not None:
         start, end = data_range
@@ -189,12 +214,16 @@ def fetch(key: str, data_range: tuple[int, int] | None) -> obstore.Bytes:
 def read_from_store(request: mapli.ResourceRequest) -> mapli.Response:
     key = request.url.removeprefix("store://")
     try:
-        return mapli.Response(fetch(key, request.data_range))
+        return mapli.Response(read_data(key, request.data_range))
     except FileNotFoundError:
         return mapli.Response.error(mapli.ErrorReason.NOT_FOUND, f"no object at {key}")
 ```
 
 `examples/private-bucket.py` puts this together, and prints what is read from the store.
+
+</details>
+
+
 
 
 ## System requirements
