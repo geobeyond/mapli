@@ -23,21 +23,19 @@
 //! cached once the handler returns.
 
 use std::collections::HashMap;
-use std::fmt;
 use std::hash::Hash;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
-use std::time::SystemTime;
 
 use crossbeam_channel::{Receiver, Sender};
 use maplibre_native::file_source::{ErrorReason as MlnErrorReason, Response};
 use maplibre_native::{
-    FileSource, FileSourceType, RequestHandle, ResourceKind as MlnResourceKind, ResourceRequest,
-    Responder, register_file_source,
+    FileSource, FileSourceType, RequestHandle, ResourceRequest, Responder, register_file_source,
 };
 
 use crate::error::{MapliError, Result};
+use crate::types::{ErrorReason, SchemeRequest, SchemeResponse};
 
 /// Number of threads that run scheme handlers.
 pub const HANDLER_THREADS: usize = 8;
@@ -47,154 +45,6 @@ pub const HANDLER_THREADS: usize = 8;
 /// The dispatcher is asked before every other source, so a handler for one of these would take
 /// over all of its requests, e.g. every HTTP request, or bypass the built-in PMTiles support.
 pub const RESERVED_SCHEMES: &[&str] = &["http", "https", "file", "asset", "mbtiles", "pmtiles"];
-
-/// What kind of resource MapLibre Native is requesting.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResourceKind {
-    Unknown,
-    Style,
-    /// A source descriptor (e.g. TileJSON or GeoJSON data), and also the byte-range reads that
-    /// the PMTiles source makes for headers, directories and tiles
-    Source,
-    Tile,
-    Glyphs,
-    SpriteImage,
-    SpriteJson,
-    Image,
-}
-
-impl ResourceKind {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            ResourceKind::Unknown => "unknown",
-            ResourceKind::Style => "style",
-            ResourceKind::Source => "source",
-            ResourceKind::Tile => "tile",
-            ResourceKind::Glyphs => "glyphs",
-            ResourceKind::SpriteImage => "sprite_image",
-            ResourceKind::SpriteJson => "sprite_json",
-            ResourceKind::Image => "image",
-        }
-    }
-
-    fn from_mln(kind: MlnResourceKind) -> Self {
-        // cxx shared enums are open, so a wildcard arm is required
-        match kind {
-            MlnResourceKind::Style => ResourceKind::Style,
-            MlnResourceKind::Source => ResourceKind::Source,
-            MlnResourceKind::Tile => ResourceKind::Tile,
-            MlnResourceKind::Glyphs => ResourceKind::Glyphs,
-            MlnResourceKind::SpriteImage => ResourceKind::SpriteImage,
-            MlnResourceKind::SpriteJSON => ResourceKind::SpriteJson,
-            MlnResourceKind::Image => ResourceKind::Image,
-            _ => ResourceKind::Unknown,
-        }
-    }
-}
-
-/// A request for a URL of a registered scheme.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SchemeRequest {
-    pub url: String,
-    pub kind: ResourceKind,
-    /// Inclusive `(start, end)` byte range, present for partial reads such as PMTiles'
-    pub data_range: Option<(u64, u64)>,
-}
-
-impl SchemeRequest {
-    fn from_mln(request: &ResourceRequest) -> Self {
-        Self {
-            url: request.url.clone(),
-            kind: ResourceKind::from_mln(request.kind),
-            data_range: request
-                .data_range
-                .as_ref()
-                .map(|range| (*range.start(), *range.end())),
-        }
-    }
-}
-
-/// Why a scheme handler failed to serve a request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ErrorReason {
-    NotFound,
-    Server,
-    Connection,
-    RateLimit,
-    Other,
-}
-
-impl ErrorReason {
-    fn to_mln(self) -> MlnErrorReason {
-        match self {
-            ErrorReason::NotFound => MlnErrorReason::NotFound,
-            ErrorReason::Server => MlnErrorReason::Server,
-            ErrorReason::Connection => MlnErrorReason::Connection,
-            ErrorReason::RateLimit => MlnErrorReason::RateLimit,
-            ErrorReason::Other => MlnErrorReason::Other,
-        }
-    }
-}
-
-impl fmt::Display for ErrorReason {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            ErrorReason::NotFound => "not found",
-            ErrorReason::Server => "server error",
-            ErrorReason::Connection => "connection error",
-            ErrorReason::RateLimit => "rate limited",
-            ErrorReason::Other => "error",
-        })
-    }
-}
-
-/// What a scheme handler answers a request with.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SchemeResponse {
-    Data(Vec<u8>),
-    /// Successful but empty, e.g. a missing tile, which is drawn as empty instead of failing
-    /// the render
-    NoContent,
-    Error {
-        reason: ErrorReason,
-        message: String,
-        /// For rate limited requests, when they can be retried
-        retry_after: Option<SystemTime>,
-    },
-}
-
-impl SchemeResponse {
-    pub fn error(reason: ErrorReason, message: impl Into<String>) -> Self {
-        SchemeResponse::Error {
-            reason,
-            message: message.into(),
-            retry_after: None,
-        }
-    }
-
-    /// Convert to a MapLibre Native response.
-    ///
-    /// Error messages are prefixed with the URL and the reason, as MapLibre Native only passes
-    /// the message on to render errors.
-    fn into_mln(self, url: &str) -> Response {
-        match self {
-            SchemeResponse::Data(data) => Response::data(data),
-            SchemeResponse::NoContent => Response::no_content(),
-            SchemeResponse::Error {
-                reason,
-                message,
-                retry_after,
-            } => {
-                let response =
-                    Response::error(reason.to_mln(), format!("{url}: {reason}: {message}"));
-                match retry_after {
-                    Some(at) => response.with_retry_after(at),
-                    None => response,
-                }
-            }
-        }
-    }
-}
 
 /// Serves the requests for the URLs of one scheme.
 ///
@@ -477,15 +327,6 @@ mod tests {
     }
 
     #[test]
-    fn error_message_carries_url_and_reason() {
-        let response = SchemeResponse::error(ErrorReason::NotFound, "no object at a/b")
-            .into_mln("store://a/b");
-        let error = response.error.unwrap();
-        assert_eq!(error.reason, MlnErrorReason::NotFound);
-        assert_eq!(error.message, "store://a/b: not found: no object at a/b");
-    }
-
-    #[test]
     fn in_flight_merges_identical_jobs() {
         let in_flight: InFlight<&str, u32> = InFlight::default();
         assert!(in_flight.join("a", 1));
@@ -508,12 +349,5 @@ mod tests {
         in_flight.join("a", true);
         assert!(in_flight.abandon_if_all(&"a", |&cancelled| cancelled));
         assert!(in_flight.join("a", false)); // starts a new job
-    }
-
-    #[test]
-    fn data_and_no_content_convert() {
-        let response = SchemeResponse::Data(vec![1, 2]).into_mln("store://a");
-        assert_eq!(response.data, Some(vec![1, 2]));
-        assert!(SchemeResponse::NoContent.into_mln("store://a").no_content);
     }
 }

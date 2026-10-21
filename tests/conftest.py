@@ -1,77 +1,57 @@
 import json
 import struct
-from collections.abc import Callable, Iterator
+from collections.abc import (
+    Callable,
+    Iterator,
+)
 
 import pytest
 
 import mapli
 
-Answer = (
-    mapli.Response
-    | bytes
-    | bytearray
-    | memoryview
-    | Callable[[mapli.ResourceRequest], object]
-)
+# Handlers in the tests return `object`, as some return invalid values on purpose
+Handler = Callable[[mapli.ResourceRequest], object]
+SetMemoryHandler = Callable[[Handler], None]
 
-# what the `memory://` scheme handler serves, by URL. Callables are called with the request
-MEMORY: dict[str, Answer] = {}
-# requests seen by the `memory://` scheme handler
-MEMORY_REQUESTS: list[mapli.ResourceRequest] = []
+# the handler of the running test for `memory://` URLs, set with the `memory_handler` fixture
+_handler: Handler | None = None
 
 
-def memory_handler(request: mapli.ResourceRequest) -> object:
-    MEMORY_REQUESTS.append(request)
-    answer = MEMORY.get(request.url)
-    if answer is None:
-        return mapli.Response.error(
-            mapli.ErrorReason.NOT_FOUND, f"nothing stored at {request.url}"
-        )
-    if callable(answer):
-        return answer(request)
-    return answer
+def _forward(request: mapli.ResourceRequest) -> object:
+    if _handler is None:
+        return mapli.Response.error(mapli.ErrorReason.NOT_FOUND, "no handler set")
+    return _handler(request)
 
 
-# Scheme handlers must be registered before any render pool exists, so this happens on import,
-# before any test runs. The handler returns `object`, as tests also make it return invalid values
-mapli.register_scheme_handler("memory", memory_handler)  # ty: ignore[invalid-argument-type]
+# Scheme handlers can only be registered before the first render pool exists, so tests cannot
+# register their own. Instead, this one is registered on import, before any test runs, and
+# forwards every request to the handler that the running test set
+mapli.register_scheme_handler("memory", _forward)  # ty: ignore[invalid-argument-type]
 
 
 @pytest.fixture
-def memory() -> Iterator[dict[str, Answer]]:
-    """What the `memory://` scheme serves, emptied after each test."""
-    yield MEMORY
-    MEMORY.clear()
-    MEMORY_REQUESTS.clear()
+def memory_handler() -> Iterator[SetMemoryHandler]:
+    """Set the handler for `memory://` URLs during the test."""
+    global _handler
+
+    def set_handler(handler: Handler) -> None:
+        global _handler
+        _handler = handler
+
+    yield set_handler
+    _handler = None
 
 
-@pytest.fixture
-def memory_requests(memory: dict[str, Answer]) -> list[mapli.ResourceRequest]:
-    """Requests seen by the `memory://` scheme handler during the test."""
-    return MEMORY_REQUESTS
+def pmtiles_handler(archive: bytes) -> Callable[[mapli.ResourceRequest], bytes]:
+    """A handler serving `archive`, a PMTiles archive, answering range reads."""
 
+    def handler(request: mapli.ResourceRequest) -> bytes:
+        if request.data_range is None:
+            return archive
+        start, end = request.data_range  # inclusive
+        return archive[start : end + 1]
 
-@pytest.fixture
-def pmtiles_archive(memory: dict[str, Answer]) -> Callable[[str, bytes], bytes]:
-    """Serve a PMTiles archive at a `memory://` URL, answering range reads.
-
-    Call the returned function with the URL and the PNG of the archive's only tile, at z0. It
-    returns the archive.
-    """
-
-    def serve(url: str, tile: bytes) -> bytes:
-        archive = build_pmtiles(tile)
-
-        def read(request: mapli.ResourceRequest) -> bytes:
-            if request.data_range is None:
-                return archive
-            start, end = request.data_range  # inclusive
-            return archive[start : end + 1]
-
-        memory[url] = read
-        return archive
-
-    return serve
+    return handler
 
 
 PMTILES_HEADER_LENGTH = 127

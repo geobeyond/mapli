@@ -450,8 +450,11 @@ fn build_tile_request(
 }
 
 /// A request that MapLibre Native makes for a URL of a registered scheme.
+///
+/// Handlers never see this: `mapli.register_scheme_handler` turns it into a
+/// `mapli.ResourceRequest` dataclass before calling them.
 #[pyclass(frozen, module = "mapli._core")]
-struct ResourceRequest {
+struct RawResourceRequest {
     /// The full URL, including the scheme
     #[pyo3(get)]
     url: String,
@@ -465,20 +468,20 @@ struct ResourceRequest {
 }
 
 #[pymethods]
-impl ResourceRequest {
+impl RawResourceRequest {
     fn __repr__(&self) -> String {
         let data_range = match self.data_range {
             Some((start, end)) => format!("({start}, {end})"),
             None => "None".to_string(),
         };
         format!(
-            "ResourceRequest(url={:?}, kind={:?}, data_range={data_range})",
+            "RawResourceRequest(url={:?}, kind={:?}, data_range={data_range})",
             self.url, self.kind
         )
     }
 }
 
-impl From<&SchemeRequest> for ResourceRequest {
+impl From<&SchemeRequest> for RawResourceRequest {
     fn from(req: &SchemeRequest) -> Self {
         Self {
             url: req.url.clone(),
@@ -584,7 +587,7 @@ impl SchemeHandler for PyHandler {
     fn handle(&self, request: &SchemeRequest) -> SchemeResponse {
         // fails if the interpreter is shutting down, in which case there is nothing to call
         Python::try_attach(
-            |py| match self.0.call1(py, (ResourceRequest::from(request),)) {
+            |py| match self.0.call1(py, (RawResourceRequest::from(request),)) {
                 Ok(returned) => to_scheme_response(returned.bind(py)),
                 Err(err) => SchemeResponse::error(
                     mapli_core::ErrorReason::Other,
@@ -634,7 +637,7 @@ fn to_scheme_response(returned: &Bound<'_, PyAny>) -> SchemeResponse {
 
 /// Register `handler` for the URLs of `scheme`, process-wide.
 ///
-/// `handler` is called with a `ResourceRequest` and returns a `Response`, or `bytes`. It runs
+/// `handler` is called with a `RawResourceRequest` and returns a `Response`, or `bytes`. It runs
 /// on a thread owned by mapli. Handlers must be registered before the first `RenderPool` is
 /// created. Schemes served by MapLibre Native itself cannot be given a handler.
 #[pyfunction]
@@ -651,7 +654,7 @@ fn register_scheme_handler(scheme: &str, handler: Bound<'_, PyAny>) -> PyResult<
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<RenderPool>()?;
-    m.add_class::<ResourceRequest>()?;
+    m.add_class::<RawResourceRequest>()?;
     m.add_class::<Response>()?;
     m.add_class::<ErrorReason>()?;
     m.add_function(wrap_pyfunction!(register_scheme_handler, m)?)?;

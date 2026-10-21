@@ -13,7 +13,7 @@ class GraphicsUnavailableError(MapliError): ...
 class SchemeRegistrationError(MapliError): ...
 
 @final
-class ResourceRequest:
+class RawResourceRequest:
     @property
     def url(self) -> str: ...
     @property
@@ -40,7 +40,7 @@ class Response:
     ) -> Response: ...
 
 def register_scheme_handler(
-    scheme: str, handler: Callable[[ResourceRequest], Response | Buffer]
+    scheme: str, handler: Callable[[RawResourceRequest], Response | Buffer]
 ) -> None: ...
 
 class RenderPool:

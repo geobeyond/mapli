@@ -1,9 +1,16 @@
 """mapli: Render MapLibre styles to images in-process."""
 
+import dataclasses as _dataclasses
 import json as _json
 from collections.abc import Iterable
 from os import PathLike
-from typing import Any
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Literal,
+    Protocol,
+    cast,
+)
 
 from . import _core
 from ._core import (
@@ -11,13 +18,14 @@ from ._core import (
     GraphicsUnavailableError,
     MapliError,
     RenderError,
-    ResourceRequest,
     Response,
     SchemeRegistrationError,
     StyleLoadError,
     UnknownStyleError,
-    register_scheme_handler,
 )
+
+if TYPE_CHECKING:
+    from typing_extensions import Buffer
 
 __all__ = [
     "ErrorReason",
@@ -25,13 +33,85 @@ __all__ = [
     "MapliError",
     "RenderError",
     "RenderPool",
+    "ResourceKind",
     "ResourceRequest",
     "Response",
+    "SchemeHandlerProtocol",
     "SchemeRegistrationError",
     "StyleLoadError",
     "UnknownStyleError",
     "register_scheme_handler",
 ]
+
+
+ResourceKind = Literal[
+    "style",
+    "source",
+    "tile",
+    "glyphs",
+    "sprite_image",
+    "sprite_json",
+    "image",
+    "unknown",
+]
+
+
+@_dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
+class ResourceRequest:
+    """A request that MapLibre Native makes for a URL of a registered scheme."""
+
+    url: str
+    kind: ResourceKind
+    data_range: tuple[int, int] | None = None
+
+
+class SchemeHandlerProtocol(Protocol):
+    """Serves the requests for the URLs of a scheme, see `register_scheme_handler`.
+
+    Any callable taking a `ResourceRequest` will do: a function, a lambda or an object with a
+    `__call__` method. It returns a `Response`, or the data as a bytes-like object.
+
+    Notes:
+
+    - Handlers run on threads owned by mapli, so requests are served concurrently when the
+      handler's I/O releases the GIL, as obstore and the standard library's sockets and
+      files do.
+
+    - Handlers can block while they fetch data, but must be thread-safe, and values in
+      a `threading.local()` do not persist between calls.
+
+    - An exception raised by a handler fails the render with a `RenderError`.
+
+    - Identical requests (same URL and byte range) made while a handler is already serving
+      one wait for it and get the same response, instead of calling the handler again.
+
+    - mapli does not cache responses, beyond what MapLibre Native keeps on its own, so a
+      handler that wants to avoid reading the same data again must cache it itself.
+    """
+
+    def __call__(self, request: ResourceRequest, /) -> "Response | Buffer": ...
+
+
+def register_scheme_handler(scheme: str, handler: SchemeHandlerProtocol) -> None:
+    """Register `handler` for the URLs of `scheme`, process-wide.
+
+    `handler` is called with a `ResourceRequest` and returns a `Response`, or `bytes`. It runs
+    on a thread owned by mapli. Handlers must be registered before the first `RenderPool` is
+    created. Schemes served by MapLibre Native itself cannot be given a handler.
+    """
+    if not callable(handler):
+        raise TypeError("handler must be callable")
+
+    def inner_handler(request: _core.RawResourceRequest) -> "Response | Buffer":
+        return handler(
+            ResourceRequest(
+                url=request.url,
+                kind=cast(ResourceKind, request.kind),
+                data_range=request.data_range,
+            )
+        )
+
+    _core.register_scheme_handler(scheme, inner_handler)
 
 
 class RenderPool(_core.RenderPool):
