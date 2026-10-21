@@ -2,9 +2,12 @@
 
 The archive is read with [obstore](https://developmentseed.org/obstore/), using the
 credentials of the environment, so the style refers to it with a stable `store://` URL that
-contains no secret. Every request the handler serves is printed, with its byte range, followed by
-the read from the store and how long it took. With `--cache-size`, reads are cached in memory,
-and requests served from the cache print no read.
+contains no secret.
+
+Every request the handler serves is printed, with its byte range, followed by
+the read from the store and how long it took.
+
+With `--cache-size`, reads are cached in memory, and requests served from the cache print no read.
 
 The style is made up from the archive itself: its header gives the bounds and the tile type,
 and for vector tiles its metadata lists the layers, which are all drawn.
@@ -18,13 +21,12 @@ uv sync --group dev
 xvfb-run -a uv run python examples/private-bucket.py s3://my-bucket tiles/roads.pmtiles
 
 # an S3-compatible store served over plain HTTP, e.g. a local MinIO
-AWS_ENDPOINT_URL=http://localhost:9000 AWS_ACCESS_KEY_ID=minioadmin \\
-    AWS_SECRET_ACCESS_KEY=minioadmin \\
-    xvfb-run -a uv run python examples/private-bucket.py s3://my-bucket roads.pmtiles --allow-http
+AWS_ENDPOINT_URL=http://localhost:9000 AWS_ALLOW_HTTP=true \\
+    AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin \\
+    xvfb-run -a uv run python examples/private-bucket.py s3://my-bucket roads.pmtiles
 
-# Google Cloud Storage, Azure, or a local directory, which needs no credentials
+# Google Cloud Storage, with credentials from GOOGLE_APPLICATION_CREDENTIALS
 xvfb-run -a uv run python examples/private-bucket.py gs://my-bucket tiles/roads.pmtiles
-xvfb-run -a uv run python examples/private-bucket.py file:///data/tiles roads.pmtiles
 ```
 
 `xvfb-run` is only needed on Linux machines without a display.
@@ -41,15 +43,12 @@ from pathlib import Path
 from typing import Any
 
 import obstore
-from obstore.store import ObjectStore, from_url
+from obstore.store import (
+    ObjectStore,
+    from_url,
+)
 
 import mapli
-
-SCHEME = "store"
-
-# PMTiles v3 tile types, from the header
-MVT, PNG, JPEG, WEBP, AVIF = 1, 2, 3, 4, 5
-COLORS = ["#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4", "#42d4f4", "#f032e6"]
 
 
 class StoreHandler:
@@ -60,22 +59,23 @@ class StoreHandler:
     don't.
     """
 
+    CUSTOM_SCHEME = "store"
+
     def __init__(self, store: ObjectStore, cache_size: int = 0) -> None:
         self.store = store
-        # a cache of size 0 keeps nothing, so every request is read from the store
-        self.cached_read = functools.lru_cache(maxsize=cache_size)(self.read)
+        self._cached_read = functools.lru_cache(maxsize=cache_size)(self._read)
 
     def __call__(self, request: mapli.ResourceRequest) -> mapli.Response:
         print(f"request {request.kind} {request.url} {request.data_range}")
-        key = request.url.removeprefix(f"{SCHEME}://")
+        key = request.url.removeprefix(f"{self.CUSTOM_SCHEME}://")
         try:
-            return mapli.Response(self.cached_read(key, request.data_range))
+            return mapli.Response(self._cached_read(key, request.data_range))
         except FileNotFoundError:
             return mapli.Response.error(
                 mapli.ErrorReason.NOT_FOUND, f"no object at {key}"
             )
 
-    def read(self, key: str, data_range: tuple[int, int] | None) -> obstore.Bytes:
+    def _read(self, key: str, data_range: tuple[int, int] | None) -> obstore.Bytes:
         """Read `key` from the store, raising FileNotFoundError if it is missing.
 
         This returns data and raises on errors, so that the cache never keeps errors.
@@ -92,8 +92,8 @@ class StoreHandler:
         return data
 
 
-def read_header(store: ObjectStore, key: str) -> dict[str, Any]:
-    """Read the fields of the PMTiles v3 header that the style needs.
+def read_pmtiles_header(store: ObjectStore, key: str) -> dict[str, Any]:
+    """Read a PMTiles v3 header.
 
     See https://github.com/protomaps/PMTiles/blob/main/spec/v3/spec.md#3-header
     """
@@ -126,8 +126,23 @@ def read_header(store: ObjectStore, key: str) -> dict[str, Any]:
 
 def make_style(key: str, header: dict[str, Any]) -> dict[str, Any]:
     """A style that draws everything in the archive, over a white background."""
+
+    # PMTiles v3 tile types, from the header
+    vector_types = (1, 6)  # MVT, MLT
+    raster_types = (2, 3, 4, 5)  # PNG, JPEG, WEBP, AVIF
+
+    _colors = [
+        "#e6194b",
+        "#3cb44b",
+        "#4363d8",
+        "#f58231",
+        "#911eb4",
+        "#42d4f4",
+        "#f032e6",
+    ]
+
     source: dict[str, Any] = {
-        "url": f"pmtiles://{SCHEME}://{key}",
+        "url": f"pmtiles://{StoreHandler.CUSTOM_SCHEME}://{key}",
         "minzoom": header["min_zoom"],
         "maxzoom": header["max_zoom"],
     }
@@ -139,12 +154,12 @@ def make_style(key: str, header: dict[str, Any]) -> dict[str, Any]:
         }
     ]
 
-    if header["tile_type"] == MVT:
+    if header["tile_type"] in vector_types:
         source["type"] = "vector"
         vector_layers = header["metadata"].get("vector_layers", [])
         if not vector_layers:
-            raise SystemExit("the archive's metadata does not list its vector layers")
-        for layer, color in zip(vector_layers, itertools.cycle(COLORS)):
+            raise SystemExit("the archive metadata does not list any vector layers")
+        for layer, color in zip(vector_layers, itertools.cycle(_colors)):
             common = {"source": "archive", "source-layer": layer["id"]}
             layers += [
                 {
@@ -169,7 +184,7 @@ def make_style(key: str, header: dict[str, Any]) -> dict[str, Any]:
                     "paint": {"circle-color": color, "circle-radius": 3},
                 },
             ]
-    elif header["tile_type"] in (PNG, JPEG, WEBP, AVIF):
+    elif header["tile_type"] in raster_types:
         source["type"] = "raster"
         layers.append({"id": "archive", "type": "raster", "source": "archive"})
     else:
@@ -201,28 +216,21 @@ def main() -> None:
         default=0,
         help="number of reads to keep in memory, none by default",
     )
-    parser.add_argument(
-        "--allow-http",
-        action="store_true",
-        help="allow plain HTTP endpoints, e.g. a local MinIO",
-    )
     args = parser.parse_args()
 
-    # local stores (file://) take no client options
-    if args.allow_http:
-        store = from_url(args.store_url, client_options={"allow_http": True})
-    else:
-        store = from_url(args.store_url)
-    header = read_header(store, args.key)
+    store = from_url(args.store_url)
+    header = read_pmtiles_header(store, args.key)
     print(f"archive header: {header | {'metadata': '...'}}")
 
+    handler = StoreHandler(store, args.cache_size)
     # Process-wide, and must happen before the first render pool is created
-    mapli.register_scheme_handler(SCHEME, StoreHandler(store, args.cache_size))
+    mapli.register_scheme_handler(scheme=handler.CUSTOM_SCHEME, handler=handler)
 
+    style_id = "default_style"
     pool = mapli.RenderPool(workers=1)
-    pool.register_style("archive", json=make_style(args.key, header))
+    pool.register_style(style_id, json=make_style(args.key, header))
     png = pool.render_from_bounds(
-        "archive",
+        style_id,
         bbox=args.bbox or header["bbox"],
         width=args.width,
         height=args.height,
