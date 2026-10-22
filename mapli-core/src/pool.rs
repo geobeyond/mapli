@@ -76,6 +76,10 @@ impl RenderPool {
         #[cfg(target_os = "linux")]
         crate::egl::check()?;
 
+        // MapLibre Native only uses the scheme handlers' dispatcher if it is registered before
+        // the first renderer is created
+        crate::scheme::install_dispatcher();
+
         // a shared multi-consumer queue: idle workers pull the next command from it
         let (tx, rx) = crossbeam_channel::unbounded::<Command>();
         let styles: StyleRegistry = Arc::default();

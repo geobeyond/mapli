@@ -7,9 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Custom URL scheme handlers
+
 ### Changed
+- `RenderError` messages now include MapLibre Native's reason for the failure, instead of just
+  "render failed"
 - CI: test steps now time out (10 minutes, or 45 for the Rust tests, which also compile) instead
-  of hanging for GitHub's 6 hour default, and pytest dumps every thread's traceback when a test
+  of hanging for GitHub's 6-hour default, and pytest dumps every thread's traceback when a test
   runs for over 60 seconds (`faulthandler_timeout`), to help diagnose hangs
 
 
