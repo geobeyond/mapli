@@ -221,7 +221,8 @@ jobs:
           retention-days: 2
 
   # Installs each built wheel on a plain Ubuntu runner of the same architecture, with only the
-  # runtime dependencies that the README asks users to install, and runs the test suite against it.
+  # runtime dependencies listed in docs/user-guide/system-requirements.md, and runs the test suite
+  # against it.
   test_wheel:
     needs: build_wheel
     strategy:

@@ -1,0 +1,53 @@
+name: Documentation
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+
+  workflow_dispatch:
+
+# allow only one deployment at a time, without cancelling one that is in progress
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build_docs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: "Set up uv"
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      # Only the docs dependency group is installed, not mapli itself, so this does not compile
+      # MapLibre Native. The API reference is generated from the source and from the type stub of
+      # the extension module (see `allow_inspection` in zensical.toml).
+      - name: "Install docs dependencies"
+        run: uv sync --frozen --only-group docs
+
+      - name: "Build site"
+        run: uv run --frozen --only-group docs zensical build --clean
+
+      - name: "Upload site as Pages artifact"
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy_docs:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    needs: build_docs
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: "Deploy to GitHub Pages"
+        id: deployment
+        uses: actions/deploy-pages@v5
