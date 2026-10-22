@@ -23,7 +23,7 @@ MapLibre Native from Python, through custom URL scheme handlers.
 
 mapli is distributed as prebuilt wheels attached to each
 [GitHub release](https://github.com/geobeyond/mapli/releases). Install the wheel that matches the
-machine's architecture by URL. For release 0.4.0:
+machine's architecture by URL:
 
 === "uv"
 
