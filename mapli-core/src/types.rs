@@ -542,7 +542,7 @@ impl TileRequest {
     }
 }
 
-/// What kind of resource MapLibre Native is requesting.
+/// kind of a resource being requested by MapLibre Native
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResourceKind {
     Unknown,

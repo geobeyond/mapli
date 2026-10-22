@@ -19,13 +19,12 @@
 //! MapLibre Native's PMTiles support have already loaded is not fetched again when a handler is
 //! replaced.
 //!
-//! Handlers never run on MapLibre Native's threads. Requests are queued to a pool of handler
-//! threads owned by this module, and their responses are delivered from there.
+//! Requests are queued to a pool of handler threads owned by this module, and their responses
+//! are delivered from there.
 //!
 //! MapLibre Native often makes several identical requests at the same time, e.g. for the same
 //! PMTiles directory while loading several tiles. While a handler serves a request, identical
-//! ones wait for it and get the same response, instead of calling the handler again. Nothing is
-//! cached once the handler returns.
+//! ones wait for it and get the same response, instead of calling the handler again.
 
 use std::collections::HashMap;
 use std::hash::Hash;
