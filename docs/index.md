@@ -21,31 +21,23 @@ MapLibre Native from Python, through custom URL scheme handlers.
 
 ## Installation
 
-mapli is distributed as prebuilt wheels attached to each
-[GitHub release](https://github.com/geobeyond/mapli/releases). Install the wheel that matches the
-machine's architecture by URL:
+mapli is published on [PyPI](https://pypi.org/project/mapli/):
 
 === "uv"
 
     ```shell
-    # x86_64
-    uv add "https://github.com/geobeyond/mapli/releases/download/v0.4.0/mapli-0.4.0-cp39-abi3-manylinux_2_34_x86_64.whl"
-
-    # ARM64 (aarch64)
-    uv add "https://github.com/geobeyond/mapli/releases/download/v0.4.0/mapli-0.4.0-cp39-abi3-manylinux_2_34_aarch64.whl"
+    uv add mapli
     ```
 
 === "pip"
 
     ```shell
-    # x86_64
-    pip install "https://github.com/geobeyond/mapli/releases/download/v0.4.0/mapli-0.4.0-cp39-abi3-manylinux_2_34_x86_64.whl"
-
-    # ARM64 (aarch64)
-    pip install "https://github.com/geobeyond/mapli/releases/download/v0.4.0/mapli-0.4.0-cp39-abi3-manylinux_2_34_aarch64.whl"
+    pip install mapli
     ```
 
-The wheels support CPython 3.11 and newer.
+Prebuilt wheels are available for Linux x86_64 and ARM64 (aarch64), with CPython 3.11 and newer.
+The same wheels are also attached to each
+[GitHub release](https://github.com/geobeyond/mapli/releases).
 
 
 ## Usage

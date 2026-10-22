@@ -13,19 +13,15 @@ also be served to MapLibre Native from Python, through custom URL scheme handler
 
 ## Installation
 
-mapli is distributed as prebuilt wheels attached to each
-[GitHub release](https://github.com/geobeyond/mapli/releases). Install the wheel that matches the
-machine's architecture by URL. For release 0.4.0 on x86_64:
+mapli is published on [PyPI](https://pypi.org/project/mapli/):
 
 ```shell
-uv add "https://github.com/geobeyond/mapli/releases/download/v0.4.0/mapli-0.4.0-cp39-abi3-manylinux_2_34_x86_64.whl"
+uv add mapli
 ```
 
 ```shell
-pip install "https://github.com/geobeyond/mapli/releases/download/v0.4.0/mapli-0.4.0-cp39-abi3-manylinux_2_34_x86_64.whl"
+pip install mapli
 ```
-
-For ARM64, replace `x86_64` with `aarch64` in the URL.
 
 mapli currently runs on Linux only (x86_64 and ARM64, glibc 2.34 or newer). Rendering needs an
 EGL driver, libcurl and a display (or Xvfb), see

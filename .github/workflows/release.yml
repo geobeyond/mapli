@@ -18,10 +18,11 @@ jobs:
     permissions:
       # needed for creating the GitHub release
       contents: write
-#      id-token: write
-#    environment:
-#      name: pypi
-#      url: https://pypi.org/p/mapli
+      # needed for PyPI trusted publishing
+      id-token: write
+    environment:
+      name: pypi
+      url: https://pypi.org/p/mapli
     steps:
       - name: "Grab code"
         uses: actions/checkout@v7
@@ -42,6 +43,10 @@ jobs:
           ls dist/mapli-"$version".tar.gz \
               dist/mapli-"$version"-*-manylinux_2_34_x86_64.whl \
               dist/mapli-"$version"-*-manylinux_2_34_aarch64.whl
+      # Publish to PyPI before creating the GitHub release: an upload to PyPI cannot be redone,
+      # while the GitHub release can be edited or deleted, so a failed upload must stop the job
+      - name: "Publish to PyPI"
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
       - name: "Create GitHub release"
         uses: softprops/action-gh-release@v3.0.3
         with:
@@ -50,7 +55,3 @@ jobs:
           generate_release_notes: true
           body_path: CHANGELOG.md
           append_body: true
-#      - name: "Publish to PyPI"
-#        uses: pypa/gh-action-pypi-publish@v1.14.2
-#        with:
-#          attestations: "true"

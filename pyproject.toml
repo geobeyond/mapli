@@ -15,6 +15,8 @@ name = "mapli"
 dynamic = ["version"]
 description = "Render MapLibre styles to PNG images and XYZ tiles with MapLibre Native, in-process"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Ricardo Garcia Silva", email = "ricardo.garcia.silva@geobeyond.it" }
 ]

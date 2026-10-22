@@ -32,8 +32,7 @@ Both Rust crates inherit it, and the Python package reads it from there.
 
 1. Set `version` in the root `Cargo.toml` (e.g. `0.3.0`), and refresh the lockfiles with
    `cargo update --workspace` and `uv lock`.
-2. Update `CHANGELOG.md`, and the version in the wheel URLs of the installation
-   instructions, in `README.md` and `docs/index.md`.
+2. Update `CHANGELOG.md`.
 3. Commit, then push an annotated tag with the same version, prefixed with `v`:
 
     ```shell
@@ -42,8 +41,10 @@ Both Rust crates inherit it, and the Python package reads it from there.
     ```
 
 The tag triggers the release workflow (`.github/workflows/release.yml`). It runs CI, checks that
-the version of the built wheels matches the tag, and creates a GitHub release with the wheels and
-the sdist attached.
+the version of the built wheels matches the tag, publishes the wheels and the sdist to PyPI, and
+creates a GitHub release with them attached. Publishing uses PyPI's trusted publishing, so the
+repository needs no PyPI token: the `mapli` project on PyPI trusts the `release.yml` workflow,
+run in the `pypi` environment.
 
 After the release, set the version to the next expected version with a `-dev.0` suffix
 (e.g. `0.4.0-dev.0`), refresh the lockfiles and commit:
