@@ -13,13 +13,17 @@ features = ["pyo3/extension-module"]
 name = "mapli"
 # taken from the version in Cargo.toml
 dynamic = ["version"]
-description = "Add your description here"
+description = "Render MapLibre styles to PNG images and XYZ tiles with MapLibre Native, in-process"
 readme = "README.md"
 authors = [
-    { name = "Ricardo Garcia Silva", email = "ricardo.garcia.silva@gmail.com" }
+    { name = "Ricardo Garcia Silva", email = "ricardo.garcia.silva@geobeyond.it" }
 ]
 requires-python = ">=3.11"
 dependencies = []
+
+[project.urls]
+Documentation = "https://geobeyond.github.io/mapli/"
+Repository = "https://github.com/geobeyond/mapli"
 
 [dependency-groups]
 dev = [
@@ -28,6 +32,14 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.10",
     "ty>=0.0.84",
+]
+docs = [
+    "mkdocstrings-python>=2.0.10",
+    # also in the dev group. mkdocstrings uses it to format the signatures in the API reference,
+    # and the docs CI job only installs this group, so without it there the signatures would
+    # render unformatted
+    "ruff>=0.16.10",
+    "zensical>=0.0.71",
 ]
 
 [tool.pytest.ini_options]
@@ -42,3 +54,7 @@ cache-keys = [
     { file = "Cargo.toml" },
     { file = "Cargo.lock" }
 ]
+
+[tool.ruff]
+# these pages include the example scripts with `--8<--` lines, which ruff would reformat
+extend-exclude = ["docs/examples/*.md"]
