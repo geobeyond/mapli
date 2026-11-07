@@ -15,7 +15,7 @@ const WHITE: [u8; 4] = [255, 255, 255, 255];
 type Rect = (f64, f64, f64, f64);
 
 /// Style that paints `rects` red over a white background.
-fn style_json(rects: &[Rect]) -> String {
+fn build_style_json(rects: &[Rect]) -> String {
     let polygons = rects
         .iter()
         .map(|&(w, s, e, n)| {
@@ -41,9 +41,9 @@ fn style_json(rects: &[Rect]) -> String {
     )
 }
 
-fn render(rects: &[Rect], view: impl Into<mapli_core::View>) -> RgbaImage {
+fn render_rects(rects: &[Rect], view: impl Into<mapli_core::View>) -> RgbaImage {
     let pool = RenderPool::new(PoolConfig::default()).unwrap();
-    pool.register_style("box", Style::Json(style_json(rects)));
+    pool.register_style("box", Style::Json(build_style_json(rects)));
     let req = StaticRequest {
         style: "box".into(),
         view: view.into(),
@@ -57,7 +57,7 @@ fn render(rects: &[Rect], view: impl Into<mapli_core::View>) -> RgbaImage {
 }
 
 /// Check that the red area was fitted into a 200x100 image with 20 px of padding.
-fn assert_fitted(img: &RgbaImage) {
+fn assert_image_fitted(img: &RgbaImage) {
     assert_eq!(img.dimensions(), (200, 100));
     assert_eq!(img.get_pixel(100, 50).0, RED, "bounds should be centered");
     // the padding is outside the bounds on every side
@@ -79,7 +79,7 @@ fn bounds_are_fitted_inside_padding() {
     let fit = BoundsToFit::new(Bounds::new(-10.0, -5.0, 10.0, 5.0).unwrap())
         .with_padding(20.0)
         .unwrap();
-    assert_fitted(&render(&[(-10.0, -5.0, 10.0, 5.0)], fit));
+    assert_image_fitted(&render_rects(&[(-10.0, -5.0, 10.0, 5.0)], fit));
 }
 
 #[test]
@@ -91,12 +91,12 @@ fn bounds_crossing_antimeridian_are_fitted() {
     let fit = BoundsToFit::new(Bounds::new(170.0, -20.0, -170.0, -15.0).unwrap())
         .with_padding(20.0)
         .unwrap();
-    assert_fitted(&render(&fiji, fit));
+    assert_image_fitted(&render_rects(&fiji, fit));
 }
 
 #[test]
 fn camera_view_still_renders() {
-    let img = render(
+    let img = render_rects(
         &[(-10.0, -5.0, 10.0, 5.0)],
         Camera::new(0.0, 0.0, 3.0).unwrap(),
     );
@@ -106,7 +106,7 @@ fn camera_view_still_renders() {
 #[test]
 fn plain_bounds_fill_the_image() {
     // no padding, so the bounds reach the image edges along the limiting dimension
-    let img = render(
+    let img = render_rects(
         &[(-10.0, -5.0, 10.0, 5.0)],
         Bounds::new(-10.0, -5.0, 10.0, 5.0).unwrap(),
     );

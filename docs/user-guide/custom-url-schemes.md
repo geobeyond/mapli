@@ -103,6 +103,23 @@ An exception raised by the handler also fails the render with a `RenderError`.
   supported. The `asset` scheme is mostly used on mobile platforms so not this is not 
   likely to be a relevant issue for mapli usage.
 
+!!! warning "Custom schemes and URL restrictions"
+
+    If you also call [`mapli.restrict_resource_urls()`](restricting-urls.md), a registered
+    handler is not enough for a custom scheme's URLs to be fetched: they must also be in the list
+    of allowed URL prefixes. Otherwise they are denied, and the handler is never called.
+
+    Allow the whole scheme with a prefix such as `"store://"`, or only part of it with a longer
+    prefix such as `"store://tiles/"`:
+
+    ```python
+    mapli.register_scheme_handler("store", read_from_store)
+    mapli.restrict_resource_urls(allowed_url_prefixes=["store://tiles/"])
+    ```
+
+    For PMTiles archives served by a handler, allow the URL inside `pmtiles://`, e.g.
+    `"store://tiles/"` for `pmtiles://store://tiles/roads.pmtiles`.
+
 ## Threads
 
 - Handlers run on threads owned by mapli.

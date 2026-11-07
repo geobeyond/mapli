@@ -81,6 +81,8 @@ impl RenderPool {
         // MapLibre Native only uses the scheme handlers' dispatcher if it is registered before
         // the first renderer is created
         crate::scheme::install_dispatcher();
+        // the URL rules apply to every pool, so they cannot change once one exists
+        crate::url_rules::close_rules();
 
         // a shared multi-consumer queue: idle workers pull the next command from it
         let (tx, rx) = crossbeam_channel::unbounded::<Command>();

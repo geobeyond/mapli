@@ -7,6 +7,7 @@ mod pool;
 mod resample;
 mod scheme;
 mod types;
+mod url_rules;
 mod worker;
 
 pub use encode::encode_png;
@@ -17,6 +18,7 @@ pub use scheme::{
     unregister_scheme_handler,
 };
 pub use types::*;
+pub use url_rules::restrict_resource_urls;
 
 // Re-export `RgbaImage` from the `image` crate so that users of this crate don't have to depend
 // on `image` themselves.

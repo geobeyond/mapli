@@ -17,7 +17,7 @@ import pytest
 from conftest import (
     Handler,
     build_pmtiles,
-    pmtiles_handler,
+    build_pmtiles_handler,
 )
 
 import mapli
@@ -29,7 +29,7 @@ BOX = {
 VIEW: dict[str, Any] = {"lon": 0.0, "lat": 0.0, "zoom": 0.0, "width": 64, "height": 64}
 
 
-def geojson_style(data: object) -> dict[str, Any]:
+def build_geojson_style(data: object) -> dict[str, Any]:
     return {
         "version": 8,
         "sources": {"box": {"type": "geojson", "data": data}},
@@ -45,7 +45,7 @@ def geojson_style(data: object) -> dict[str, Any]:
     }
 
 
-def raster_style(source: dict[str, Any]) -> dict[str, Any]:
+def build_raster_style(source: dict[str, Any]) -> dict[str, Any]:
     """Style drawing a raster source, given by its `tiles` or its `url`, over white."""
     return {
         "version": 8,
@@ -57,7 +57,7 @@ def raster_style(source: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def background_style(color: str) -> dict[str, Any]:
+def build_background_style(color: str) -> dict[str, Any]:
     return {
         "version": 8,
         "sources": {},
@@ -67,8 +67,8 @@ def background_style(color: str) -> dict[str, Any]:
     }
 
 
-@pytest.fixture
-def pool() -> mapli.RenderPool:
+@pytest.fixture(name="pool")
+def create_pool() -> mapli.RenderPool:
     return mapli.RenderPool(workers=2)
 
 
@@ -83,19 +83,19 @@ def unregister_memory_handler() -> Iterator[None]:
 def test_style_and_source_from_handler(pool: mapli.RenderPool) -> None:
     served: dict[str, mapli.Response | bytes] = {
         "memory://style.json": json.dumps(
-            geojson_style("memory://box.geojson")
+            build_geojson_style("memory://box.geojson")
         ).encode(),
         "memory://box.geojson": mapli.Response(json.dumps(BOX).encode()),
     }
     requests: list[mapli.ResourceRequest] = []
 
-    def handler(request: mapli.ResourceRequest) -> mapli.Response | bytes:
+    def serve_resource(request: mapli.ResourceRequest) -> mapli.Response | bytes:
         requests.append(request)
         return served[request.url]
 
-    mapli.register_scheme_handler("memory", handler)
+    mapli.register_scheme_handler("memory", serve_resource)
     pool.register_style("served", url="memory://style.json")
-    pool.register_style("inline", json=geojson_style(BOX))
+    pool.register_style("inline", json=build_geojson_style(BOX))
 
     assert pool.render("served", **VIEW) == pool.render("inline", **VIEW)
     assert all(type(r) is mapli.ResourceRequest for r in requests)
@@ -133,7 +133,7 @@ def test_handlers_satisfy_the_protocol() -> None:
     This is checked by the type checker, the test only makes sure that they run.
     """
 
-    def function(req: mapli.ResourceRequest) -> bytes:
+    def encode_url(req: mapli.ResourceRequest) -> bytes:
         return req.url.encode()
 
     class Handler:
@@ -141,7 +141,7 @@ def test_handlers_satisfy_the_protocol() -> None:
             return mapli.Response.no_content()
 
     handlers: list[mapli.SchemeHandlerProtocol] = [
-        function,
+        encode_url,
         Handler(),
         lambda request: bytearray(request.url.encode()),
     ]
@@ -156,17 +156,17 @@ def test_raw_request_is_not_public() -> None:
 
 
 def test_tiles_from_handler(pool: mapli.RenderPool) -> None:
-    pool.register_style("red-bg", json=background_style("#f00"))
+    pool.register_style("red-bg", json=build_background_style("#f00"))
     red_tile = pool.render_tile("red-bg", z=0, x=0, y=0)
     requests: list[mapli.ResourceRequest] = []
 
-    def handler(request: mapli.ResourceRequest) -> bytearray:
+    def serve_red_tile(request: mapli.ResourceRequest) -> bytearray:
         requests.append(request)
         return bytearray(red_tile)
 
-    mapli.register_scheme_handler("memory", handler)
+    mapli.register_scheme_handler("memory", serve_red_tile)
     pool.register_style(
-        "tiles", json=raster_style({"tiles": ["memory://tiles/{z}/{x}/{y}.png"]})
+        "tiles", json=build_raster_style({"tiles": ["memory://tiles/{z}/{x}/{y}.png"]})
     )
 
     assert pool.render_tile("tiles", z=0, x=0, y=0) == red_tile
@@ -177,19 +177,19 @@ def test_tiles_from_handler(pool: mapli.RenderPool) -> None:
 
 def test_pmtiles_through_handler(pool: mapli.RenderPool) -> None:
     """MapLibre Native's PMTiles support reads an archive served by a handler, in ranges."""
-    pool.register_style("red-bg", json=background_style("#f00"))
+    pool.register_style("red-bg", json=build_background_style("#f00"))
     red_tile = pool.render_tile("red-bg", z=0, x=0, y=0)
     archive = build_pmtiles(red_tile)
-    serve_archive = pmtiles_handler(archive)
+    serve_archive = build_pmtiles_handler(archive)
     requests: list[mapli.ResourceRequest] = []
 
-    def handler(request: mapli.ResourceRequest) -> bytes:
+    def serve_and_record_archive(request: mapli.ResourceRequest) -> bytes:
         requests.append(request)
         return serve_archive(request)
 
-    mapli.register_scheme_handler("memory", handler)
+    mapli.register_scheme_handler("memory", serve_and_record_archive)
     pool.register_style(
-        "archive", json=raster_style({"url": "pmtiles://memory://red.pmtiles"})
+        "archive", json=build_raster_style({"url": "pmtiles://memory://red.pmtiles"})
     )
 
     assert pool.render_tile("archive", z=0, x=0, y=0) == red_tile
@@ -212,20 +212,20 @@ def test_identical_concurrent_requests_call_handler_once(
     requests overlap. The archive has a URL of its own, as MapLibre Native's PMTiles support
     caches headers and directories by URL, for the whole process.
     """
-    pool.register_style("red-bg", json=background_style("#f00"))
+    pool.register_style("red-bg", json=build_background_style("#f00"))
     red_tile = pool.render_tile("red-bg", z=0, x=0, y=0)
     archive = build_pmtiles(red_tile)
-    serve_archive = pmtiles_handler(archive)
+    serve_archive = build_pmtiles_handler(archive)
     requests: list[mapli.ResourceRequest] = []
 
-    def slow_handler(request: mapli.ResourceRequest) -> bytes:
+    def serve_archive_slowly(request: mapli.ResourceRequest) -> bytes:
         requests.append(request)
         time.sleep(0.05)
         return serve_archive(request)
 
-    mapli.register_scheme_handler("memory", slow_handler)
+    mapli.register_scheme_handler("memory", serve_archive_slowly)
     pool.register_style(
-        "archive", json=raster_style({"url": "pmtiles://memory://merged.pmtiles"})
+        "archive", json=build_raster_style({"url": "pmtiles://memory://merged.pmtiles"})
     )
     pool.render_from_bounds(
         "archive", bbox=(-180, -85, 180, 85), width=1024, height=768
@@ -259,17 +259,17 @@ def test_bytes_like_data(
 ) -> None:
     data = wrap(json.dumps(BOX).encode())
     mapli.register_scheme_handler("memory", lambda request: data)
-    pool.register_style("served", json=geojson_style("memory://box.geojson"))
-    pool.register_style("inline", json=geojson_style(BOX))
+    pool.register_style("served", json=build_geojson_style("memory://box.geojson"))
+    pool.register_style("inline", json=build_geojson_style(BOX))
     assert pool.render("served", **VIEW) == pool.render("inline", **VIEW)
 
 
 def test_no_content_draws_nothing(pool: mapli.RenderPool) -> None:
     mapli.register_scheme_handler("memory", lambda request: mapli.Response.no_content())
     pool.register_style(
-        "tiles", json=raster_style({"tiles": ["memory://empty/{z}/{x}/{y}.png"]})
+        "tiles", json=build_raster_style({"tiles": ["memory://empty/{z}/{x}/{y}.png"]})
     )
-    pool.register_style("white", json=background_style("#fff"))
+    pool.register_style("white", json=build_background_style("#fff"))
     assert pool.render_tile("tiles", z=0, x=0, y=0) == pool.render_tile(
         "white", z=0, x=0, y=0
     )
@@ -282,7 +282,7 @@ def test_error_reaches_render(pool: mapli.RenderPool) -> None:
             mapli.ErrorReason.NOT_FOUND, "nothing stored here"
         ),
     )
-    pool.register_style("missing", json=geojson_style("memory://missing.geojson"))
+    pool.register_style("missing", json=build_geojson_style("memory://missing.geojson"))
     with pytest.raises(mapli.RenderError) as exc_info:
         pool.render("missing", **VIEW)
     message = str(exc_info.value)
@@ -315,15 +315,15 @@ def test_failing_handler(
 ) -> None:
     # some of these handlers return invalid values on purpose
     mapli.register_scheme_handler("memory", handler)  # ty: ignore[invalid-argument-type]
-    pool.register_style("broken", json=geojson_style("memory://broken.geojson"))
+    pool.register_style("broken", json=build_geojson_style("memory://broken.geojson"))
     with pytest.raises(mapli.RenderError, match=expected):
         pool.render("broken", **VIEW)
 
 
 def test_arender_with_handler(pool: mapli.RenderPool) -> None:
     mapli.register_scheme_handler("memory", lambda request: json.dumps(BOX).encode())
-    pool.register_style("served", json=geojson_style("memory://box.geojson"))
-    pool.register_style("inline", json=geojson_style(BOX))
+    pool.register_style("served", json=build_geojson_style("memory://box.geojson"))
+    pool.register_style("inline", json=build_geojson_style(BOX))
     png = asyncio.run(pool.arender("served", **VIEW))
     assert png == pool.render("inline", **VIEW)
 
@@ -332,11 +332,11 @@ def test_dropping_pool_while_handler_runs() -> None:
     """Dropping a pool waits for its workers, which may be waiting on a handler that needs the
     GIL: this must not deadlock."""
 
-    def slow(request: mapli.ResourceRequest) -> bytes:
+    def serve_box_slowly(request: mapli.ResourceRequest) -> bytes:
         time.sleep(0.3)
         return json.dumps(BOX).encode()
 
-    mapli.register_scheme_handler("memory", slow)
+    mapli.register_scheme_handler("memory", serve_box_slowly)
 
     async def start_and_cancel(pool: mapli.RenderPool) -> None:
         task = asyncio.ensure_future(pool.arender("slow", **VIEW))
@@ -344,7 +344,7 @@ def test_dropping_pool_while_handler_runs() -> None:
         task.cancel()
 
     pool = mapli.RenderPool()
-    pool.register_style("slow", json=geojson_style("memory://slow.geojson"))
+    pool.register_style("slow", json=build_geojson_style("memory://slow.geojson"))
     asyncio.run(start_and_cancel(pool))
     del pool
     gc.collect()
@@ -363,10 +363,10 @@ def test_handler_must_be_callable() -> None:
 
 def test_register_after_pool(pool: mapli.RenderPool) -> None:
     """Handlers can be registered once pools exist, and serve their requests."""
-    pool.register_style("inline", json=geojson_style(BOX))
+    pool.register_style("inline", json=build_geojson_style(BOX))
     inline = pool.render("inline", **VIEW)
     mapli.register_scheme_handler("memory", lambda request: json.dumps(BOX).encode())
-    pool.register_style("served", json=geojson_style("memory://box.geojson"))
+    pool.register_style("served", json=build_geojson_style("memory://box.geojson"))
     assert pool.render("served", **VIEW) == inline
 
 
@@ -375,19 +375,19 @@ def test_replace_handler(pool: mapli.RenderPool) -> None:
     first: list[mapli.ResourceRequest] = []
     second: list[mapli.ResourceRequest] = []
 
-    def first_handler(request: mapli.ResourceRequest) -> bytes:
+    def serve_first_box(request: mapli.ResourceRequest) -> bytes:
         first.append(request)
         return json.dumps(BOX).encode()
 
-    def second_handler(request: mapli.ResourceRequest) -> bytes:
+    def serve_second_box(request: mapli.ResourceRequest) -> bytes:
         second.append(request)
         return json.dumps(BOX).encode()
 
-    mapli.register_scheme_handler("memory", first_handler)
-    pool.register_style("first", json=geojson_style("memory://first.geojson"))
+    mapli.register_scheme_handler("memory", serve_first_box)
+    pool.register_style("first", json=build_geojson_style("memory://first.geojson"))
     pool.render("first", **VIEW)
-    mapli.register_scheme_handler("memory", second_handler)
-    pool.register_style("second", json=geojson_style("memory://second.geojson"))
+    mapli.register_scheme_handler("memory", serve_second_box)
+    pool.register_style("second", json=build_geojson_style("memory://second.geojson"))
     pool.render("second", **VIEW)
 
     assert {r.url for r in first} == {"memory://first.geojson"}
@@ -397,7 +397,7 @@ def test_replace_handler(pool: mapli.RenderPool) -> None:
 def test_unregister(pool: mapli.RenderPool) -> None:
     mapli.register_scheme_handler("memory", lambda request: json.dumps(BOX).encode())
     mapli.unregister_scheme_handler("memory")
-    pool.register_style("gone", json=geojson_style("memory://gone.geojson"))
+    pool.register_style("gone", json=build_geojson_style("memory://gone.geojson"))
     with pytest.raises(mapli.RenderError):
         pool.render("gone", **VIEW)
     with pytest.raises(mapli.UnknownSchemeError):

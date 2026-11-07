@@ -19,7 +19,7 @@ RED = bytes([255, 0, 0, 255])
 BLUE = bytes([0, 0, 255, 255])
 
 
-def background(color: str) -> dict[str, Any]:
+def build_background_style(color: str) -> dict[str, Any]:
     """A style painting the whole map in `color`."""
     return {
         "version": 8,
@@ -30,11 +30,11 @@ def background(color: str) -> dict[str, Any]:
     }
 
 
-@pytest.fixture
-def pool() -> mapli.RenderPool:
+@pytest.fixture(name="pool")
+def create_pool() -> mapli.RenderPool:
     # a single worker, so renders after the replacement reach the renderers cached before it
     pool = mapli.RenderPool(workers=1)
-    pool.register_style("bg", json=background("#f00"))
+    pool.register_style("bg", json=build_background_style("#f00"))
     return pool
 
 
@@ -42,7 +42,7 @@ def test_replaced_style_is_rendered(pool: mapli.RenderPool) -> None:
     assert bytes(pool.render("bg", **VIEW)[:4]) == RED
     assert bytes(pool.render_tile("bg", **TILE)[:4]) == RED
 
-    pool.register_style("bg", json=background("#00f"))
+    pool.register_style("bg", json=build_background_style("#00f"))
 
     assert bytes(pool.render("bg", **VIEW)[:4]) == BLUE
     assert bytes(pool.render_tile("bg", **TILE)[:4]) == BLUE

@@ -45,6 +45,11 @@ pub enum MapliError {
     #[error("no handler is registered for scheme {0:?}")]
     UnknownScheme(String),
 
+    /// The URL rules can no longer be set, because a render pool has been created or because
+    /// they have already been set.
+    #[error("URL rules cannot be set: {0}")]
+    UrlRulesClosed(String),
+
     /// OS refused to start a worker thread
     #[error("failed to spawn render worker: {0}")]
     WorkerSpawnFailed(String),

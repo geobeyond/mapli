@@ -40,6 +40,13 @@ class GraphicsUnavailableError(MapliError):
 class UnknownSchemeError(MapliError):
     """No scheme handler is registered for the scheme."""
 
+class UrlRulesClosedError(MapliError):
+    """The URL rules can no longer be set.
+
+    Raised by `restrict_resource_urls` once a `RenderPool` has been created, or if the rules
+    have already been set.
+    """
+
 @final
 class RawResourceRequest:
     @property
@@ -98,6 +105,7 @@ def register_scheme_handler(
     scheme: str, handler: Callable[[RawResourceRequest], Response | Buffer]
 ) -> None: ...
 def unregister_scheme_handler(scheme: str) -> None: ...
+def restrict_resource_urls(allowed_url_prefixes: list[str]) -> None: ...
 
 class RenderPool:
     def __init__(self, workers: int = 1, max_renderers_per_worker: int = 8) -> None:

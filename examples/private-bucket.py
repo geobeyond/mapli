@@ -63,7 +63,7 @@ class StoreHandler:
 
     def __init__(self, store: ObjectStore, cache_size: int = 0) -> None:
         self.store = store
-        self._cached_read = functools.lru_cache(maxsize=cache_size)(self._read)
+        self._cached_read = functools.lru_cache(maxsize=cache_size)(self._read_object)
 
     def __call__(self, request: mapli.ResourceRequest) -> mapli.Response:
         print(f"request {request.kind} {request.url} {request.data_range}")
@@ -75,7 +75,9 @@ class StoreHandler:
                 mapli.ErrorReason.NOT_FOUND, f"no object at {key}"
             )
 
-    def _read(self, key: str, data_range: tuple[int, int] | None) -> obstore.Bytes:
+    def _read_object(
+        self, key: str, data_range: tuple[int, int] | None
+    ) -> obstore.Bytes:
         """Read `key` from the store, raising FileNotFoundError if it is missing.
 
         This returns data and raises on errors, so that the cache never keeps errors.

@@ -17,14 +17,14 @@ PORTUGAL = (-9.6, 36.9, -6.1, 42.2)
 VIEW: dict[str, Any] = {"bbox": PORTUGAL, "width": 64, "height": 48}
 
 
-def png_size(png: bytes) -> tuple[int, int]:
+def read_png_size(png: bytes) -> tuple[int, int]:
     """Read width and height from the PNG IHDR chunk."""
     assert png.startswith(b"\x89PNG")
     return struct.unpack(">II", png[16:24])
 
 
-@pytest.fixture
-def pool() -> mapli.RenderPool:
+@pytest.fixture(name="pool")
+def create_pool() -> mapli.RenderPool:
     pool = mapli.RenderPool(workers=2)
     pool.register_style("bg", json=STYLE)
     return pool
@@ -37,7 +37,7 @@ def test_render_from_bounds_size(
     pool: mapli.RenderPool, pixel_ratio: float, expected: tuple[int, int]
 ) -> None:
     png = pool.render_from_bounds("bg", **VIEW, pixel_ratio=pixel_ratio)
-    assert png_size(png) == expected
+    assert read_png_size(png) == expected
 
 
 def test_arender_from_bounds_matches_render_from_bounds(
@@ -56,12 +56,12 @@ def test_render_from_bounds_accepts_iterables(
     pool: mapli.RenderPool, bbox: Any
 ) -> None:
     png = pool.render_from_bounds("bg", bbox=bbox, width=64, height=48)
-    assert png_size(png) == (64, 48)
+    assert read_png_size(png) == (64, 48)
 
 
 def test_render_from_bounds_crossing_antimeridian(pool: mapli.RenderPool) -> None:
     png = pool.render_from_bounds("bg", bbox=(170, -20, -170, -15), width=64, height=48)
-    assert png_size(png) == (64, 48)
+    assert read_png_size(png) == (64, 48)
 
 
 @pytest.mark.parametrize(

@@ -23,6 +23,7 @@ from ._core import (
     StyleLoadError,
     UnknownSchemeError,
     UnknownStyleError,
+    UrlRulesClosedError,
 )
 
 if TYPE_CHECKING:
@@ -42,7 +43,9 @@ __all__ = [
     "StyleLoadError",
     "UnknownSchemeError",
     "UnknownStyleError",
+    "UrlRulesClosedError",
     "register_scheme_handler",
+    "restrict_resource_urls",
     "unregister_scheme_handler",
 ]
 
@@ -149,6 +152,39 @@ def unregister_scheme_handler(scheme: str) -> None:
         UnknownSchemeError: If `scheme` has no handler.
     """
     _core.unregister_scheme_handler(scheme)
+
+
+def restrict_resource_urls(allowed_url_prefixes: Iterable[str]) -> None:
+    """Only allow MapLibre Native to fetch the URLs that start with one of the prefixes.
+
+    MapLibre Native fetches every URL a style names: remote URLs, local files, and the URLs of
+    custom schemes. An application that renders styles it does not fully control can use this to
+    limit what they can reach. The rules are process-wide, and without them every URL is allowed.
+
+    Requests for other URLs fail with the message `"<url>: access denied by URL rules"`, which
+    makes the render raise `RenderError`, or `StyleLoadError` for the style itself. This applies
+    to the URLs of custom schemes as well, even if they have a handler.
+
+    The rules can only be set once, before the first `RenderPool` is created.
+
+    Args:
+        allowed_url_prefixes: The allowed URL prefixes. A prefix is either a URL, e.g.
+            `"https://fonts.example.org/"`, which allows the URLs that start with it at a path
+            boundary, or a scheme followed by `://`, e.g. `"store://"`, which allows every URL of
+            the scheme. Local files are only allowed by a `file://` prefix, e.g.
+            `"file:///srv/tiles/"`. An empty list denies every URL.
+
+    Raises:
+        TypeError: If `allowed_url_prefixes` is a single string.
+        ValueError: If a prefix is not a URL, or a scheme followed by `://`.
+        UrlRulesClosedError: If a `RenderPool` has already been created, or if the rules have
+            already been set.
+    """
+    if isinstance(allowed_url_prefixes, str):
+        raise TypeError(
+            "allowed_url_prefixes must be an iterable of strings, not a string"
+        )
+    _core.restrict_resource_urls(list(allowed_url_prefixes))
 
 
 class RenderPool(_core.RenderPool):

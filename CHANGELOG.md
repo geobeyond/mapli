@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `render_bbox` and `arender_bbox`, which render exactly a bounding box, stretched to the image
   size, as OGC API Maps and WMS GetMap require
 - `mapli.MAX_LAT`, the latitude limit of Web Mercator that bounding boxes must stay within
+- `restrict_resource_urls()`, which limits the URLs that styles may fetch to a list of allowed
+  prefixes, for applications that render styles they do not fully control
 
 ### Changed
 - `RenderPool()` now releases the GIL while creating the pool, so other Python threads are no

@@ -8,6 +8,7 @@ repository contains complete programs that use mapli:
 | [Concurrent thumbnails](thumbnails.md) | Rendering several images at the same time with the async API |
 | [FastAPI web API](fastapi.md) | Serving map images and XYZ tiles over HTTP |
 | [Private bucket with obstore](private-bucket.md) | Rendering a PMTiles archive from a private object storage bucket, through a custom URL scheme |
+| [Untrusted styles](untrusted-styles.md) | Rendering styles submitted by users, while only allowing them to fetch URLs from an allow list |
 
 The examples use dependencies from the `dev` dependency group. To run them from a clone of the
 repository:
