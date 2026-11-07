@@ -46,6 +46,11 @@ creates a GitHub release with them attached. Publishing uses PyPI's trusted publ
 repository needs no PyPI token: the `mapli` project on PyPI trusts the `release.yml` workflow,
 run in the `pypi` environment.
 
+!!! warning "PyPI authorization"
+
+    Publishing a new release on the Python Package Index **requires** that one of the mapli maintainers provides 
+    explicit authorization.
+
 After the release, set the version to the next expected version with a `-dev.0` suffix
 (e.g. `0.4.0-dev.0`), refresh the lockfiles and commit:
 
