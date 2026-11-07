@@ -1,4 +1,4 @@
-"""Render MapLibre styles to PNG images with MapLibre Native, inside the Python process."""
+"""Render MapLibre styles to images with MapLibre Native, inside the Python process."""
 
 import dataclasses as _dataclasses
 import json as _json
@@ -150,7 +150,7 @@ def unregister_scheme_handler(scheme: str) -> None:
 
 
 class RenderPool(_core.RenderPool):
-    """A pool of worker threads that render MapLibre styles to PNG images.
+    """A pool of worker threads that render MapLibre styles to images.
 
     Styles are registered under an id with `register_style`, and then rendered by id. Each
     worker keeps a MapLibre Native renderer per style, which is reused across render calls.
@@ -198,8 +198,9 @@ class RenderPool(_core.RenderPool):
         bearing: float = 0.0,
         pitch: float = 0.0,
         pixel_ratio: float = 1.0,
+        output: Literal["png", "rgba"] = "png",
     ) -> bytes:
-        """Render a static map image, fitted to a bounding box, to PNG bytes.
+        """Render a static map image, fitted to a bounding box, to PNG bytes or raw pixels.
 
         The zoom is chosen so that the bounds fit in the image, leaving `padding` on every side.
         Blocks until the image is rendered. The GIL is released while waiting.
@@ -217,13 +218,19 @@ class RenderPool(_core.RenderPool):
             pitch: Tilt of the map, in degrees from straight down (0-60).
             pixel_ratio: Number of image pixels per logical pixel. The image is
                 `width * pixel_ratio` by `height * pixel_ratio` pixels.
+            output: `"png"` for PNG-encoded bytes, or `"rgba"` for the raw pixels, which skips
+                PNG encoding, e.g. to hand the image to Pillow or numpy.
 
         Returns:
-            The image, PNG encoded.
+            The image: PNG encoded with `output="png"`, or with `output="rgba"`, its raw pixels,
+                row by row from the top-left, 4 bytes (red, green, blue, alpha) per pixel, with
+                straight (not premultiplied) alpha. The image is `floor(width * pixel_ratio)` by
+                `floor(height * pixel_ratio)` pixels.
 
         Raises:
             ValueError: If `bbox` does not have 4 values, or an argument is out of range, e.g.
-                a `padding` that leaves no room for the bounds.
+                a `padding` that leaves no room for the bounds, or `output` is neither `"png"`
+                nor `"rgba"`.
             UnknownStyleError: If no style is registered under `style_id`.
             StyleLoadError: If MapLibre Native fails to load the style.
             RenderError: If MapLibre Native fails to render the image.
@@ -237,6 +244,7 @@ class RenderPool(_core.RenderPool):
             bearing=bearing,
             pitch=pitch,
             pixel_ratio=pixel_ratio,
+            output=output,
         )
 
     async def arender_from_bounds(
@@ -250,8 +258,9 @@ class RenderPool(_core.RenderPool):
         bearing: float = 0.0,
         pitch: float = 0.0,
         pixel_ratio: float = 1.0,
+        output: Literal["png", "rgba"] = "png",
     ) -> bytes:
-        """Asynchronously render a static map image, fitted to a bounding box, to PNG bytes.
+        """Asynchronously render a static map image, fitted to a bounding box.
 
         Takes the same arguments, and raises the same exceptions, as `render_from_bounds`. The
         request is submitted to the pool when the returned coroutine is first awaited, which
@@ -267,6 +276,7 @@ class RenderPool(_core.RenderPool):
             bearing=bearing,
             pitch=pitch,
             pixel_ratio=pixel_ratio,
+            output=output,
         )
 
 

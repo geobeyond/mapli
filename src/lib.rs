@@ -148,14 +148,14 @@ impl RenderPool {
         self.inner.has_style(&style_id.into())
     }
 
-    /// Render a static map image to PNG bytes.
+    /// Render a static map image to PNG bytes, or raw RGBA pixels with `output="rgba"`.
     ///
     /// `lon` and `lat` are in degrees, `width` and `height` in logical pixels (the image is
     /// `width * pixel_ratio` by `height * pixel_ratio` pixels). `bearing` is in degrees clockwise
     /// from north, `pitch` in degrees from straight down (0-60).
     #[pyo3(signature = (
         style_id, *, lon, lat, zoom ,width, height,
-        bearing = 0.0, pitch = 0.0, pixel_ratio = 1.0,
+        bearing = 0.0, pitch = 0.0, pixel_ratio = 1.0, output = "png",
     ))]
     #[allow(clippy::too_many_arguments)]
     fn render<'py>(
@@ -170,6 +170,7 @@ impl RenderPool {
         bearing: f64,
         pitch: f64,
         pixel_ratio: f32,
+        output: &str,
     ) -> PyResult<Bound<'py, PyBytes>> {
         // build and validate the request while holding the GIL, so we can return a
         // PyErr if something is wrong
@@ -183,27 +184,28 @@ impl RenderPool {
             bearing,
             pitch,
             pixel_ratio,
+            parse_output(output)?,
         )
         .map_err(to_py_err)?;
 
-        // now release the GIL while the worker renders and encodes, since both are slow and
-        // don't touch Python objects.
-        let png = py
-            .detach(|| self.inner.render(req).and_then(Rendered::into_png))
+        // now release the GIL while the worker renders and encodes (when `output` is "png"),
+        // since both are slow and don't touch Python objects.
+        let bytes = py
+            .detach(|| self.inner.render(req).map(into_bytes))
             .map_err(to_py_err)?;
 
         // we have the GIL again: copy the bytes into a Python `bytes` object and return it
-        Ok(PyBytes::new(py, &png))
+        Ok(PyBytes::new(py, &bytes))
     }
 
-    /// Asynchronously render a static map image to PNG bytes.
+    /// Asynchronously render a static map image to PNG bytes or raw RGBA pixels.
     ///
     /// Takes the same arguments as `render`. Returns a coroutine that must be awaited inside an
     /// asyncio event loop. Nothing is submitted to the pool until it is first awaited.
     /// Cancelling it skips the render if a worker has not picked it up yet.
     #[pyo3(signature = (
         style_id, *, lon, lat, zoom ,width, height,
-        bearing = 0.0, pitch = 0.0, pixel_ratio = 1.0,
+        bearing = 0.0, pitch = 0.0, pixel_ratio = 1.0, output = "png".to_owned(),
     ))]
     #[allow(clippy::too_many_arguments)]
     async fn arender(
@@ -217,6 +219,7 @@ impl RenderPool {
         bearing: f64,
         pitch: f64,
         pixel_ratio: f32,
+        output: String,
     ) -> PyResult<Py<PyBytes>> {
         let req = build_static_request(
             &style_id,
@@ -228,22 +231,24 @@ impl RenderPool {
             bearing,
             pitch,
             pixel_ratio,
+            parse_output(&output)?,
         )
         .map_err(to_py_err)?;
 
         // This future is polled on the event loop thread, so it must not do CPU work.
-        // The worker already encoded the PNG, which makes `into_png` a no-op here.
-        let png = self
+        // The worker already encoded the PNG, if one was requested, so `into_bytes` only
+        // unwraps the buffer here.
+        let bytes = self
             .inner
             .render_async(req)
             .await
-            .and_then(Rendered::into_png)
+            .map(into_bytes)
             .map_err(to_py_err)?;
 
-        Ok(Python::attach(|py| PyBytes::new(py, &png).unbind()))
+        Ok(Python::attach(|py| PyBytes::new(py, &bytes).unbind()))
     }
 
-    /// Render a static map image, fitted to a bounding box, to PNG bytes.
+    /// Render a static map image, fitted to a bounding box, to PNG bytes or raw RGBA pixels.
     ///
     /// `bbox` is `(west, south, east, north)`, in degrees. The zoom is chosen so that the bounds
     /// fit in the image, leaving `padding` on every side. `width`, `height` and `padding` are in
@@ -252,7 +257,7 @@ impl RenderPool {
     /// world rather than raising an error.
     #[pyo3(signature = (
         style_id, *, bbox, width, height,
-        padding = 0.0, bearing = 0.0, pitch = 0.0, pixel_ratio = 1.0,
+        padding = 0.0, bearing = 0.0, pitch = 0.0, pixel_ratio = 1.0, output = "png",
     ))]
     #[allow(clippy::too_many_arguments)]
     fn render_from_bounds<'py>(
@@ -266,6 +271,7 @@ impl RenderPool {
         bearing: f64,
         pitch: f64,
         pixel_ratio: f32,
+        output: &str,
     ) -> PyResult<Bound<'py, PyBytes>> {
         let req = build_bounds_request(
             style_id,
@@ -276,20 +282,22 @@ impl RenderPool {
             bearing,
             pitch,
             pixel_ratio,
+            parse_output(output)?,
         )
         .map_err(to_py_err)?;
-        let png = py
-            .detach(|| self.inner.render(req).and_then(Rendered::into_png))
+        let bytes = py
+            .detach(|| self.inner.render(req).map(into_bytes))
             .map_err(to_py_err)?;
-        Ok(PyBytes::new(py, &png))
+        Ok(PyBytes::new(py, &bytes))
     }
 
-    /// Asynchronously render a static map image, fitted to a bounding box, to PNG bytes.
+    /// Asynchronously render a static map image, fitted to a bounding box, to PNG bytes or raw
+    /// RGBA pixels.
     ///
     /// Behaves like `arender`: returns a coroutine that submits the request when first awaited.
     #[pyo3(signature = (
         style_id, *, bbox, width, height,
-        padding = 0.0, bearing = 0.0, pitch = 0.0, pixel_ratio = 1.0,
+        padding = 0.0, bearing = 0.0, pitch = 0.0, pixel_ratio = 1.0, output = "png".to_owned(),
     ))]
     #[allow(clippy::too_many_arguments)]
     async fn arender_from_bounds(
@@ -302,6 +310,7 @@ impl RenderPool {
         bearing: f64,
         pitch: f64,
         pixel_ratio: f32,
+        output: String,
     ) -> PyResult<Py<PyBytes>> {
         let req = build_bounds_request(
             &style_id,
@@ -312,23 +321,26 @@ impl RenderPool {
             bearing,
             pitch,
             pixel_ratio,
+            parse_output(&output)?,
         )
         .map_err(to_py_err)?;
-        let png = self
+        let bytes = self
             .inner
             .render_async(req)
             .await
-            .and_then(Rendered::into_png)
+            .map(into_bytes)
             .map_err(to_py_err)?;
 
-        Ok(Python::attach(|py| PyBytes::new(py, &png).unbind()))
+        Ok(Python::attach(|py| PyBytes::new(py, &bytes).unbind()))
     }
 
-    /// Render a map tile in the XYZ (WebMercatorQuad) scheme to PNG bytes.
+    /// Render a map tile in the XYZ (WebMercatorQuad) scheme to PNG bytes or raw RGBA pixels.
     ///
     /// `tile_size` is in logical pixels; the image is `tile_size * pixel_ratio` pixels wide.
     /// MapLibre zoom levels are based on 512 px tiles, so 256 px tiles cannot be rendered at z=0.
-    #[pyo3(signature = (style_id, *, z, x, y, tile_size = 512, pixel_ratio = 1.0))]
+    #[pyo3(signature = (
+        style_id, *, z, x, y, tile_size = 512, pixel_ratio = 1.0, output = "png",
+    ))]
     #[allow(clippy::too_many_arguments)]
     fn render_tile<'py>(
         &self,
@@ -339,19 +351,23 @@ impl RenderPool {
         y: u32,
         tile_size: u32,
         pixel_ratio: f32,
+        output: &str,
     ) -> PyResult<Bound<'py, PyBytes>> {
-        let req =
-            build_tile_request(style_id, z, x, y, tile_size, pixel_ratio).map_err(to_py_err)?;
-        let png = py
-            .detach(|| self.inner.render_tile(req).and_then(Rendered::into_png))
+        let format = parse_output(output)?;
+        let req = build_tile_request(style_id, z, x, y, tile_size, pixel_ratio, format)
             .map_err(to_py_err)?;
-        Ok(PyBytes::new(py, &png))
+        let bytes = py
+            .detach(|| self.inner.render_tile(req).map(into_bytes))
+            .map_err(to_py_err)?;
+        Ok(PyBytes::new(py, &bytes))
     }
 
-    /// Asynchronously render a map tile to PNG bytes.
+    /// Asynchronously render a map tile to PNG bytes or raw RGBA pixels.
     ///
     /// Behaves like `arender`: returns a coroutine that submits the request when first awaited.
-    #[pyo3(signature = (style_id, *, z, x, y, tile_size = 512, pixel_ratio = 1.0))]
+    #[pyo3(signature = (
+        style_id, *, z, x, y, tile_size = 512, pixel_ratio = 1.0, output = "png".to_owned(),
+    ))]
     #[allow(clippy::too_many_arguments)]
     async fn arender_tile(
         &self,
@@ -361,17 +377,19 @@ impl RenderPool {
         y: u32,
         tile_size: u32,
         pixel_ratio: f32,
+        output: String,
     ) -> PyResult<Py<PyBytes>> {
-        let req =
-            build_tile_request(&style_id, z, x, y, tile_size, pixel_ratio).map_err(to_py_err)?;
-        let png = self
+        let format = parse_output(&output)?;
+        let req = build_tile_request(&style_id, z, x, y, tile_size, pixel_ratio, format)
+            .map_err(to_py_err)?;
+        let bytes = self
             .inner
             .render_tile_async(req)
             .await
-            .and_then(Rendered::into_png)
+            .map(into_bytes)
             .map_err(to_py_err)?;
 
-        Ok(Python::attach(|py| PyBytes::new(py, &png).unbind()))
+        Ok(Python::attach(|py| PyBytes::new(py, &bytes).unbind()))
     }
 
     fn __repr__(&self) -> String {
@@ -390,6 +408,7 @@ fn build_static_request(
     bearing: f64,
     pitch: f64,
     pixel_ratio: f32,
+    format: OutputFormat,
 ) -> mapli_core::Result<StaticRequest> {
     let camera = Camera::new(lon, lat, zoom)?
         .with_bearing(bearing)?
@@ -399,7 +418,7 @@ fn build_static_request(
         style: style_id.into(),
         view: camera.into(),
         spec,
-        format: OutputFormat::Png,
+        format,
     })
 }
 
@@ -413,6 +432,7 @@ fn build_bounds_request(
     bearing: f64,
     pitch: f64,
     pixel_ratio: f32,
+    format: OutputFormat,
 ) -> mapli_core::Result<StaticRequest> {
     let fit = BoundsToFit::new(Bounds::new(west, south, east, north)?)
         .with_padding(padding)?
@@ -423,7 +443,7 @@ fn build_bounds_request(
         style: style_id.into(),
         view: fit.into(),
         spec,
-        format: OutputFormat::Png,
+        format,
     };
     // check that the padding fits in the image now, while we can still raise a ValueError
     req.validate()?;
@@ -437,6 +457,7 @@ fn build_tile_request(
     y: u32,
     tile_size: u32,
     pixel_ratio: f32,
+    format: OutputFormat,
 ) -> mapli_core::Result<TileRequest> {
     let tile_size = NonZeroU32::new(tile_size)
         .ok_or_else(|| mapli_core::MapliError::InvalidInput("tile_size must be > 0".into()))?;
@@ -445,8 +466,28 @@ fn build_tile_request(
         tile: TileCoord::new(z, x, y)?,
         tile_size,
         pixel_ratio: PixelRatio::new(pixel_ratio)?,
-        format: OutputFormat::Png,
+        format,
     })
+}
+
+/// Convert the `output` argument of the render methods to an `OutputFormat`.
+fn parse_output(output: &str) -> PyResult<OutputFormat> {
+    match output {
+        "png" => Ok(OutputFormat::Png),
+        "rgba" => Ok(OutputFormat::Raw),
+        _ => Err(PyValueError::new_err(format!(
+            "output must be \"png\" or \"rgba\", got {output:?}"
+        ))),
+    }
+}
+
+/// The bytes of a rendered image: PNG data, or the raw RGBA pixels, row by row from the top-left,
+/// with straight alpha (MapLibre Native un-premultiplies them before handing them over).
+fn into_bytes(rendered: Rendered) -> Vec<u8> {
+    match rendered {
+        Rendered::Raw(img) => img.into_raw(),
+        Rendered::Png(bytes) => bytes,
+    }
 }
 
 /// A request that MapLibre Native makes for a URL of a registered scheme.

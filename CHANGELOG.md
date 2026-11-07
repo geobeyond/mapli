@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `output` keyword on render methods: `output="rgba"` returns the raw pixels, skipping PNG
+  encoding. The default, `output="png"`, returns PNG bytes
+
 ## [0.4.1] - 2026-10-22
 
 ### Added

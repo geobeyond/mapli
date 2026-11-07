@@ -61,16 +61,65 @@ renders it.
 
 ## Output
 
-The render methods return the image as PNG-encoded `bytes`. The image size is given in logical
-pixels. `pixel_ratio` (default `1.0`) sets the number of image pixels per logical pixel: with
-`width=512, height=512, pixel_ratio=2`, the image is 1024 x 1024 pixels, with labels and line
-widths drawn at twice their size, as for high-density displays.
+The render methods return the image as `bytes`, in the format chosen with `output`:
+
+- `"png"` (the default): a PNG-encoded image;
+- `"rgba"`: the raw pixels, without any encoding. See [Raw pixels](#raw-pixels).
+
+Image size is given in logical pixels and `pixel_ratio`, which defaults to `1.0`, sets the 
+number of image pixels per logical pixel: with `width=512, height=512, pixel_ratio=2`, the image is 1024 x 1024
+pixels, with labels and line widths drawn at twice their size, as for high-density displays. 
+
+When needed, the size in image pixels is rounded down: the image is `floor(width * pixel_ratio)` by
+`floor(height * pixel_ratio)` pixels (for tiles, `floor(tile_size * pixel_ratio)` pixels wide and
+high).
+
+
+### Raw pixels
+
+With `output="rgba"`, the pixels are returned row by row from the top-left, 4 bytes (red, green,
+blue, alpha) per pixel, with straight (not premultiplied) alpha. This output format is useful 
+whenever there is a need to further process the generated image. The returned bytes can be 
+handed directly to libraries such as Pillow or numpy:
+
+```python
+import math
+
+import mapli
+import numpy as np
+from PIL import Image
+
+pool = mapli.RenderPool()
+pool.register_style("demo", url="https://demotiles.maplibre.org/style.json")
+
+width, height, pixel_ratio = 512, 256, 2
+rgba = pool.render(
+    "demo",
+    lon=-9.14,
+    lat=38.72,
+    zoom=5,
+    width=width,
+    height=height,
+    pixel_ratio=pixel_ratio,
+    output="rgba",
+)
+
+image_width = math.floor(width * pixel_ratio)
+image_height = math.floor(height * pixel_ratio)
+
+# encoding encode the image as WebP
+image = Image.frombytes("RGBA", (image_width, image_height), rgba)
+image.save("lisbon.webp", quality=80)
+
+# using it in numpy, as an array of shape (height, width, 4)
+pixels = np.frombuffer(rgba, dtype=np.uint8).reshape(image_height, image_width, 4)
+```
 
 ## Errors
 
 | Exception | Raised when |
 |---|---|
-| `ValueError` | `register_style` is not given exactly one of `url`, `path`, `json`; or a render argument is out of range |
+| `ValueError` | `register_style` is not given exactly one of `url`, `path`, `json`; or a render argument is out of range, or `output` is neither `"png"` nor `"rgba"` |
 | `UnknownStyleError` | no style is registered under the given id |
 | `StyleLoadError` | MapLibre Native fails to load the style, e.g. the URL cannot be fetched or the JSON is invalid |
 | `RenderError` | MapLibre Native fails to render the image |
