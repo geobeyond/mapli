@@ -65,10 +65,26 @@ pub(crate) fn run(rx: Receiver<Command>, styles: StyleRegistry, max_renderers: u
 type StaticKey = (StyleId, PixelRatio);
 type TileKey = (StyleId, NonZeroU32, PixelRatio);
 
+/// A cached renderer, with the registered style it was built from.
+///
+/// Registering a style again under the same id stores a new `Arc<Style>`, so a renderer whose
+/// `style` is not the registry's current `Arc` (by pointer) is stale. Holding the `Arc` keeps the
+/// old allocation alive, so its address cannot be reused by a later style and match by mistake.
+struct Cached<R> {
+    renderer: R,
+    style: Arc<Style>,
+}
+
+impl<R> Cached<R> {
+    fn is_built_from(&self, style: &Arc<Style>) -> bool {
+        Arc::ptr_eq(&self.style, style)
+    }
+}
+
 struct Worker {
     styles: StyleRegistry,
-    static_renderers: RendererCache<StaticKey, ImageRenderer<Static>>,
-    tile_renderers: RendererCache<TileKey, ImageRenderer<Tile>>,
+    static_renderers: RendererCache<StaticKey, Cached<ImageRenderer<Static>>>,
+    tile_renderers: RendererCache<TileKey, Cached<ImageRenderer<Tile>>>,
 }
 
 impl Worker {
@@ -136,24 +152,30 @@ impl Worker {
 
     /// Get the cached static renderer for `style` at `spec`'s pixel ratio, creating it if needed,
     /// and size it to `spec`.
+    ///
+    /// A cached renderer built from a style that has since been replaced is rebuilt.
     fn static_renderer(
         &mut self,
         style: &StyleId,
         spec: ImageSpec,
     ) -> Result<&mut ImageRenderer<Static>> {
-        let styles = &self.styles;
-        let renderer = self.static_renderers.get_or_try_insert_with(
+        let current = lookup_style(&self.styles, style)?;
+        let cached = self.static_renderers.get_or_try_insert_with(
             (style.clone(), spec.pixel_ratio),
+            |cached| cached.is_built_from(&current),
             || {
-                let loaded = lookup_style(styles, style)?;
                 let mut renderer = ImageRendererBuilder::new()
                     .with_size(spec.width, spec.height)
                     .with_pixel_ratio(spec.pixel_ratio.get())
                     .build_static_renderer();
-                load_style(&mut renderer, style, &loaded)?;
-                Ok(renderer)
+                load_style(&mut renderer, style, &current)?;
+                Ok(Cached {
+                    renderer,
+                    style: Arc::clone(&current),
+                })
             },
         )?;
+        let renderer = &mut cached.renderer;
         // Cheap when the size is unchanged: MapLibre Native only reallocates the framebuffer
         // when the size differs
         renderer.set_map_size(Size {
@@ -166,19 +188,26 @@ impl Worker {
     fn render_tile(&mut self, req: TileRequest) -> Result<RgbaImage> {
         let key = (req.style.clone(), req.tile_size, req.pixel_ratio);
 
-        let styles = &self.styles;
-        let renderer = self.tile_renderers.get_or_try_insert_with(key, || {
-            let style = lookup_style(styles, &req.style)?;
-            // tile renderers use the width as the tile size, so the size must be square
-            let mut renderer = ImageRendererBuilder::new()
-                .with_size(req.tile_size, req.tile_size)
-                .with_pixel_ratio(req.pixel_ratio.get())
-                .build_tile_renderer();
-            load_style(&mut renderer, &req.style, &style)?;
-            Ok(renderer)
-        })?;
+        let current = lookup_style(&self.styles, &req.style)?;
+        let cached = self.tile_renderers.get_or_try_insert_with(
+            key,
+            |cached| cached.is_built_from(&current),
+            || {
+                // tile renderers use the width as the tile size, so the size must be square
+                let mut renderer = ImageRendererBuilder::new()
+                    .with_size(req.tile_size, req.tile_size)
+                    .with_pixel_ratio(req.pixel_ratio.get())
+                    .build_tile_renderer();
+                load_style(&mut renderer, &req.style, &current)?;
+                Ok(Cached {
+                    renderer,
+                    style: Arc::clone(&current),
+                })
+            },
+        )?;
 
-        let image = renderer
+        let image = cached
+            .renderer
             .render_tile(req.tile.z(), req.tile.x(), req.tile.y())
             .map_err(|e| MapliError::RenderFailed(e.to_string()))?;
 
@@ -243,7 +272,11 @@ impl<K: Eq + Hash + Clone, V> RendererCache<K, V> {
         }
     }
 
-    /// Get the value for `key`, creating it with `create` if missing.
+    /// Get the value for `key`, creating it with `create` if missing or if `is_current` returns
+    /// `false` for the cached value.
+    ///
+    /// A value that is not current is removed before `create` runs, so it is gone even if
+    /// `create` fails.
     ///
     /// This uses `contains_key` and then `get_mut` instead of the more idiomatic
     /// `entry()` API. This is because evicting needs `&mut self.entries` while an
@@ -251,10 +284,19 @@ impl<K: Eq + Hash + Clone, V> RendererCache<K, V> {
     fn get_or_try_insert_with(
         &mut self,
         key: K,
+        is_current: impl FnOnce(&V) -> bool,
         create: impl FnOnce() -> Result<V>,
     ) -> Result<&mut V> {
         self.clock += 1;
         let now = self.clock;
+        if self
+            .entries
+            .get(&key)
+            .is_some_and(|(value, _)| !is_current(value))
+        {
+            // the stale value is dropped here, on the worker thread
+            self.entries.remove(&key);
+        }
         if !self.entries.contains_key(&key) {
             let value = create()?;
             if self.entries.len() >= self.capacity {
@@ -288,13 +330,29 @@ impl<K: Eq + Hash + Clone, V> RendererCache<K, V> {
 mod tests {
     use super::*;
 
+    fn current(_: &u32) -> bool {
+        true
+    }
+
+    fn failure() -> Result<u32> {
+        Err(MapliError::RenderFailed("boom".into()))
+    }
+
     #[test]
     fn cache_evicts_least_recently_used() {
         let mut cache: RendererCache<&str, u32> = RendererCache::new(2);
-        cache.get_or_try_insert_with("a", || Ok(1)).unwrap();
-        cache.get_or_try_insert_with("b", || Ok(2)).unwrap();
-        cache.get_or_try_insert_with("a", || Ok(99)).unwrap(); // touch "a"
-        cache.get_or_try_insert_with("c", || Ok(3)).unwrap(); // evicts "b"
+        cache
+            .get_or_try_insert_with("a", current, || Ok(1))
+            .unwrap();
+        cache
+            .get_or_try_insert_with("b", current, || Ok(2))
+            .unwrap();
+        cache
+            .get_or_try_insert_with("a", current, || Ok(99))
+            .unwrap(); // touch "a"
+        cache
+            .get_or_try_insert_with("c", current, || Ok(3))
+            .unwrap(); // evicts "b"
 
         assert!(cache.entries.contains_key("a"));
         assert!(!cache.entries.contains_key("b"));
@@ -305,10 +363,47 @@ mod tests {
     #[test]
     fn failed_creation_does_not_evict() {
         let mut cache: RendererCache<&str, u32> = RendererCache::new(1);
-        cache.get_or_try_insert_with("a", || Ok(1)).unwrap();
-        let res =
-            cache.get_or_try_insert_with("b", || Err(MapliError::RenderFailed("boom".into())));
+        cache
+            .get_or_try_insert_with("a", current, || Ok(1))
+            .unwrap();
+        let res = cache.get_or_try_insert_with("b", current, failure);
         assert!(res.is_err());
         assert!(cache.entries.contains_key("a"));
+    }
+
+    #[test]
+    fn stale_value_is_recreated() {
+        let mut cache: RendererCache<&str, u32> = RendererCache::new(2);
+        cache
+            .get_or_try_insert_with("a", current, || Ok(1))
+            .unwrap();
+        let value = cache
+            .get_or_try_insert_with("a", |v| *v == 2, || Ok(2))
+            .unwrap();
+        assert_eq!(*value, 2);
+        assert_eq!(cache.entries.len(), 1);
+    }
+
+    #[test]
+    fn failed_recreation_removes_stale_value() {
+        let mut cache: RendererCache<&str, u32> = RendererCache::new(2);
+        cache
+            .get_or_try_insert_with("a", current, || Ok(1))
+            .unwrap();
+        let res = cache.get_or_try_insert_with("a", |_| false, failure);
+        assert!(res.is_err());
+        assert!(!cache.entries.contains_key("a"));
+    }
+
+    #[test]
+    fn cached_renderer_matches_style_by_registration() {
+        let old = Arc::new(Style::Json("{}".into()));
+        let new = Arc::new(Style::Json("{}".into())); // equal content, different registration
+        let cached = Cached {
+            renderer: (),
+            style: Arc::clone(&old),
+        };
+        assert!(cached.is_built_from(&old));
+        assert!(!cached.is_built_from(&new));
     }
 }

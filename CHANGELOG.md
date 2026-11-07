@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of one per image size. Requests for many different sizes no longer evict renderers
   and reload their styles
 
+### Fixed
+- Registering a style again under an id already in use now replaces it everywhere
+
 
 ## [0.4.1] - 2026-10-22
 
