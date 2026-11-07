@@ -35,6 +35,8 @@ nav = [
 
 [project.theme]
 language = "en"
+logo = "img/mapli-logo-standalone-128-transparent-trimmed.png"
+favicon = "img/mapli-logo-standalone-128-transparent-trimmed.png"
 features = [
   "content.code.copy",
   "content.tabs.link",
