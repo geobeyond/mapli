@@ -59,8 +59,9 @@ def test_arender_unknown_style(pool: mapli.RenderPool) -> None:
 
 
 def test_arender_invalid_input(pool: mapli.RenderPool) -> None:
+    view: dict[str, Any] = {**VIEW, "width": 0}
     with pytest.raises(ValueError):
-        asyncio.run(pool.arender("bg", **{**VIEW, "width": 0}))
+        asyncio.run(pool.arender("bg", **view))
 
 
 def test_arender_cancellation_leaves_pool_usable(pool: mapli.RenderPool) -> None:

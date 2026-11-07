@@ -1,7 +1,10 @@
 from collections.abc import Callable
 from enum import Enum
 from os import PathLike
-from typing import final
+from typing import (
+    Literal,
+    final,
+)
 
 from typing_extensions import Buffer
 
@@ -137,8 +140,9 @@ class RenderPool:
         bearing: float = 0.0,
         pitch: float = 0.0,
         pixel_ratio: float = 1.0,
+        output: Literal["png", "rgba"] = "png",
     ) -> bytes:
-        """Render a static map image, centered on a point, to PNG bytes.
+        """Render a static map image, centered on a point, to PNG bytes or raw pixels.
 
         Blocks until the image is rendered. The GIL is released while waiting.
 
@@ -153,12 +157,18 @@ class RenderPool:
             pitch: Tilt of the map, in degrees from straight down (0-60).
             pixel_ratio: Number of image pixels per logical pixel. The image is
                 `width * pixel_ratio` by `height * pixel_ratio` pixels.
+            output: `"png"` for PNG-encoded bytes, or `"rgba"` for the raw pixels, which skips
+                PNG encoding, e.g. to hand the image to Pillow or numpy.
 
         Returns:
-            The image, PNG encoded.
+            The image: PNG encoded with `output="png"`, or with `output="rgba"`, its raw pixels,
+                row by row from the top-left, 4 bytes (red, green, blue, alpha) per pixel, with
+                straight (not premultiplied) alpha. The image is `floor(width * pixel_ratio)` by
+                `floor(height * pixel_ratio)` pixels.
 
         Raises:
-            ValueError: If an argument is out of range, e.g. a `pitch` outside 0-60.
+            ValueError: If an argument is out of range, e.g. a `pitch` outside 0-60, or
+                `output` is neither `"png"` nor `"rgba"`.
             UnknownStyleError: If no style is registered under `style_id`.
             StyleLoadError: If MapLibre Native fails to load the style.
             RenderError: If MapLibre Native fails to render the image.
@@ -175,8 +185,9 @@ class RenderPool:
         bearing: float = 0.0,
         pitch: float = 0.0,
         pixel_ratio: float = 1.0,
+        output: Literal["png", "rgba"] = "png",
     ) -> bytes:
-        """Asynchronously render a static map image, centered on a point, to PNG bytes.
+        """Asynchronously render a static map image, centered on a point.
 
         Takes the same arguments, and raises the same exceptions, as `render`. The request is
         submitted to the pool when the returned coroutine is first awaited, which must happen
@@ -194,6 +205,7 @@ class RenderPool:
         bearing: float = 0.0,
         pitch: float = 0.0,
         pixel_ratio: float = 1.0,
+        output: Literal["png", "rgba"] = "png",
     ) -> bytes: ...
     async def arender_from_bounds(
         self,
@@ -206,6 +218,7 @@ class RenderPool:
         bearing: float = 0.0,
         pitch: float = 0.0,
         pixel_ratio: float = 1.0,
+        output: Literal["png", "rgba"] = "png",
     ) -> bytes: ...
     def render_tile(
         self,
@@ -216,8 +229,9 @@ class RenderPool:
         y: int,
         tile_size: int = 512,
         pixel_ratio: float = 1.0,
+        output: Literal["png", "rgba"] = "png",
     ) -> bytes:
-        """Render a map tile in the XYZ (WebMercatorQuad) tiling scheme to PNG bytes.
+        """Render a map tile in the XYZ (WebMercatorQuad) tiling scheme to PNG bytes or raw pixels.
 
         Blocks until the tile is rendered. The GIL is released while waiting.
 
@@ -231,13 +245,19 @@ class RenderPool:
                 256 px tiles cannot be rendered at `z=0`.
             pixel_ratio: Number of image pixels per logical pixel. The tile is
                 `tile_size * pixel_ratio` pixels wide.
+            output: `"png"` for PNG-encoded bytes, or `"rgba"` for the raw pixels, which skips
+                PNG encoding, e.g. to hand the image to Pillow or numpy.
 
         Returns:
-            The tile, PNG encoded.
+            The tile: PNG encoded with `output="png"`, or with `output="rgba"`, its raw pixels,
+                row by row from the top-left, 4 bytes (red, green, blue, alpha) per pixel, with
+                straight (not premultiplied) alpha. The tile is `floor(tile_size * pixel_ratio)`
+                pixels wide and high.
 
         Raises:
             ValueError: If an argument is out of range, e.g. `x` or `y` outside the tile grid of
-                zoom level `z`, or a 256 px tile at `z=0`.
+                zoom level `z`, a 256 px tile at `z=0`, or `output` is neither `"png"` nor
+                `"rgba"`.
             UnknownStyleError: If no style is registered under `style_id`.
             StyleLoadError: If MapLibre Native fails to load the style.
             RenderError: If MapLibre Native fails to render the tile.
@@ -251,8 +271,9 @@ class RenderPool:
         y: int,
         tile_size: int = 512,
         pixel_ratio: float = 1.0,
+        output: Literal["png", "rgba"] = "png",
     ) -> bytes:
-        """Asynchronously render a map tile to PNG bytes.
+        """Asynchronously render a map tile.
 
         Takes the same arguments, and raises the same exceptions, as `render_tile`. Behaves like
         `arender`: the request is submitted to the pool when the coroutine is first awaited.
