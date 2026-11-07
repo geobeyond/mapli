@@ -8,6 +8,9 @@ from typing import (
 
 from typing_extensions import Buffer
 
+MAX_LAT: float
+"""Latitude limit of Web Mercator, in degrees: bounding boxes must be within ±`MAX_LAT`."""
+
 class MapliError(Exception):
     """Base class of the exceptions raised by mapli."""
 
@@ -63,7 +66,7 @@ class ErrorReason(Enum):
 
 @final
 class Response:
-    """What a scheme handler answers a request with: data, no content or an error."""
+    """Response of a scheme handler to a request: data, no content or an error."""
 
     def __init__(self, data: Buffer) -> None:
         """Create a successful response carrying `data`.
@@ -217,6 +220,26 @@ class RenderPool:
         padding: float = 0.0,
         bearing: float = 0.0,
         pitch: float = 0.0,
+        pixel_ratio: float = 1.0,
+        output: Literal["png", "rgba"] = "png",
+    ) -> bytes: ...
+    def render_bbox(
+        self,
+        style_id: str,
+        *,
+        bbox: tuple[float, float, float, float],
+        width: int,
+        height: int,
+        pixel_ratio: float = 1.0,
+        output: Literal["png", "rgba"] = "png",
+    ) -> bytes: ...
+    async def arender_bbox(
+        self,
+        style_id: str,
+        *,
+        bbox: tuple[float, float, float, float],
+        width: int,
+        height: int,
         pixel_ratio: float = 1.0,
         output: Literal["png", "rgba"] = "png",
     ) -> bytes: ...

@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `output` keyword on render methods: `output="rgba"` returns the raw pixels, skipping PNG
   encoding. The default, `output="png"`, returns PNG bytes
+- `render_bbox` and `arender_bbox`, which render exactly a bounding box, stretched to the image
+  size, as OGC API Maps and WMS GetMap require
+- `mapli.MAX_LAT`, the latitude limit of Web Mercator that bounding boxes must stay within
+
 ### Changed
 - `RenderPool()` now releases the GIL while creating the pool, so other Python threads are no
   longer blocked while the first pool in a process checks for EGL support

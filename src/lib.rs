@@ -19,6 +19,7 @@ use pyo3::types::{PyBytes, PyMemoryView};
 use mapli_core::{
     Bounds, BoundsToFit, Camera, ImageSpec, OutputFormat, PixelRatio, PoolConfig, Rendered,
     SchemeHandler, SchemeRequest, SchemeResponse, StaticRequest, Style, TileCoord, TileRequest,
+    View,
 };
 
 // We use the name `mapli` (and not `mapli-core`) for the Python module because users
@@ -338,6 +339,76 @@ impl RenderPool {
         Ok(Python::attach(|py| PyBytes::new(py, &bytes).unbind()))
     }
 
+    /// Render a static map image covering exactly a bounding box, to PNG bytes or raw RGBA
+    /// pixels.
+    ///
+    /// `bbox` is `(west, south, east, north)`, in degrees, with the same rules as in
+    /// `render_from_bounds`. The bounds, projected to Web Mercator, are stretched to
+    /// `width × height` logical pixels, so pixels are not square when the aspects differ.
+    #[pyo3(signature = (
+        style_id, *, bbox, width, height, pixel_ratio = 1.0, output = "png",
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn render_bbox<'py>(
+        &self,
+        py: Python<'py>,
+        style_id: &str,
+        bbox: (f64, f64, f64, f64),
+        width: u32,
+        height: u32,
+        pixel_ratio: f32,
+        output: &str,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let req = build_bbox_request(
+            style_id,
+            bbox,
+            width,
+            height,
+            pixel_ratio,
+            parse_output(output)?,
+        )
+        .map_err(to_py_err)?;
+        let bytes = py
+            .detach(|| self.inner.render(req).map(into_bytes))
+            .map_err(to_py_err)?;
+        Ok(PyBytes::new(py, &bytes))
+    }
+
+    /// Asynchronously render a static map image covering exactly a bounding box, to PNG bytes
+    /// or raw RGBA pixels.
+    ///
+    /// Behaves like `arender`: returns a coroutine that submits the request when first awaited.
+    #[pyo3(signature = (
+        style_id, *, bbox, width, height, pixel_ratio = 1.0, output = "png".to_owned(),
+    ))]
+    async fn arender_bbox(
+        &self,
+        style_id: String,
+        bbox: (f64, f64, f64, f64),
+        width: u32,
+        height: u32,
+        pixel_ratio: f32,
+        output: String,
+    ) -> PyResult<Py<PyBytes>> {
+        let req = build_bbox_request(
+            &style_id,
+            bbox,
+            width,
+            height,
+            pixel_ratio,
+            parse_output(&output)?,
+        )
+        .map_err(to_py_err)?;
+        let bytes = self
+            .inner
+            .render_async(req)
+            .await
+            .map(into_bytes)
+            .map_err(to_py_err)?;
+
+        Ok(Python::attach(|py| PyBytes::new(py, &bytes).unbind()))
+    }
+
     /// Render a map tile in the XYZ (WebMercatorQuad) scheme to PNG bytes or raw RGBA pixels.
     ///
     /// `tile_size` is in logical pixels; the image is `tile_size * pixel_ratio` pixels wide.
@@ -454,6 +525,23 @@ fn build_bounds_request(
     Ok(req)
 }
 
+fn build_bbox_request(
+    style_id: &str,
+    (west, south, east, north): (f64, f64, f64, f64),
+    width: u32,
+    height: u32,
+    pixel_ratio: f32,
+    format: OutputFormat,
+) -> mapli_core::Result<StaticRequest> {
+    let spec = ImageSpec::new(width, height)?.with_pixel_ratio(PixelRatio::new(pixel_ratio)?);
+    Ok(StaticRequest {
+        style: style_id.into(),
+        view: View::ExactBounds(Bounds::new(west, south, east, north)?),
+        spec,
+        format,
+    })
+}
+
 fn build_tile_request(
     style_id: &str,
     z: u8,
@@ -503,7 +591,7 @@ struct RawResourceRequest {
     /// The full URL, including the scheme
     #[pyo3(get)]
     url: String,
-    /// What is being requested: "style", "source", "tile", "glyphs", "sprite_image",
+    /// Kind of resource requested: "style", "source", "tile", "glyphs", "sprite_image",
     /// "sprite_json", "image" or "unknown". PMTiles reads are "source" requests.
     #[pyo3(get)]
     kind: &'static str,
@@ -564,7 +652,7 @@ impl From<ErrorReason> for mapli_core::ErrorReason {
     }
 }
 
-/// What a scheme handler answers a request with: data, no content or an error.
+/// Response of a scheme handler to a request: data, no content or an error.
 #[pyclass(frozen, module = "mapli._core")]
 struct Response {
     inner: SchemeResponse,
@@ -712,6 +800,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ErrorReason>()?;
     m.add_function(wrap_pyfunction!(register_scheme_handler, m)?)?;
     m.add_function(wrap_pyfunction!(unregister_scheme_handler, m)?)?;
+    m.add("MAX_LAT", mapli_core::MAX_LAT)?;
 
     let py = m.py();
     m.add("MapliError", py.get_type::<MapliError>())?;

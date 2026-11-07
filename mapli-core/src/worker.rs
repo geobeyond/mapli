@@ -10,13 +10,17 @@ use std::sync::Arc;
 
 use crossbeam_channel::Receiver;
 use image::RgbaImage;
-use maplibre_native::{EdgeInsets, ImageRenderer, ImageRendererBuilder, Static, Tile};
+use maplibre_native::{
+    CameraUpdate, EdgeInsets, ImageRenderer, ImageRendererBuilder, Static, Tile,
+};
 
+use crate::bbox::plan_bbox_render;
 use crate::encode::encode;
 use crate::error::{MapliError, Result};
 use crate::pool::StyleRegistry;
+use crate::resample::stretch_crop;
 use crate::types::{
-    ImageSpec, PixelRatio, Rendered, StaticRequest, Style, StyleId, TileRequest, View,
+    Bounds, ImageSpec, PixelRatio, Rendered, StaticRequest, Style, StyleId, TileRequest, View,
 };
 
 pub(crate) type Reply = oneshot::Sender<Result<Rendered>>;
@@ -75,35 +79,76 @@ impl Worker {
     }
 
     fn render_static(&mut self, req: StaticRequest) -> Result<RgbaImage> {
-        let key = (req.style.clone(), req.spec);
+        match req.view {
+            View::ExactBounds(bounds) => self.render_exact_bounds(&req.style, bounds, req.spec),
+            View::Camera(camera) => {
+                let renderer = self.static_renderer(&req.style, req.spec)?;
+                render_camera(renderer, &camera.to_camera_update())
+            }
+            View::BoundsToFit(fit) => {
+                let renderer = self.static_renderer(&req.style, req.spec)?;
+                // Fitting bounds needs the renderer, as the resulting zoom depends on its size
+                let camera = renderer.camera_for_bounds(
+                    fit.bounds().to_lat_lng_bounds(),
+                    Some(EdgeInsets::all(fit.padding())),
+                    fit.bearing(),
+                    fit.pitch(),
+                );
+                render_camera(renderer, &camera)
+            }
+        }
+    }
 
-        let styles = &self.styles;
-        let renderer = self.statics.get_or_try_insert_with(key, || {
-            let style = lookup_style(styles, &req.style)?;
-            let mut renderer = ImageRendererBuilder::new()
-                .with_size(req.spec.width, req.spec.height)
-                .with_pixel_ratio(req.spec.pixel_ratio.get())
-                .build_static_renderer();
-            load_style(&mut renderer, &req.style, &style)?;
-            Ok(renderer)
-        })?;
-
-        // Fitting bounds needs the renderer, as the resulting zoom depends on its size
-        let camera = match req.view {
-            View::Camera(camera) => camera.to_camera_update(),
-            View::BoundsToFit(fit) => renderer.camera_for_bounds(
-                fit.bounds().to_lat_lng_bounds(),
-                Some(EdgeInsets::all(fit.padding())),
-                fit.bearing(),
-                fit.pitch(),
-            ),
-        };
+    /// Render exactly `bounds`, stretched to `spec`; see [`plan_bbox_render`].
+    fn render_exact_bounds(
+        &mut self,
+        style: &StyleId,
+        bounds: Bounds,
+        spec: ImageSpec,
+    ) -> Result<RgbaImage> {
+        let plan = plan_bbox_render(bounds, spec);
+        let renderer = self.static_renderer(style, plan.render_spec)?;
         let image = renderer
-            .render_static(&camera)
+            .render_static(&plan.camera.to_camera_update())
             .map_err(|e| MapliError::RenderFailed(e.to_string()))?;
+        let image = image.as_image();
 
-        // Copy into an owned, Send buffer that can leave this thread
-        Ok(image.as_image().clone())
+        // the crop is in logical pixels, the image in physical ones
+        let (width, height) = image.dimensions();
+        let crop = plan.crop.scaled(
+            f64::from(width) / f64::from(plan.render_spec.width.get()),
+            f64::from(height) / f64::from(plan.render_spec.height.get()),
+        );
+        let (out_width, out_height) = if plan.render_spec == spec {
+            (width, height)
+        } else {
+            physical_size(spec)
+        };
+        if (out_width, out_height) == (width, height)
+            && crop.covers(width, height, STRETCH_TOLERANCE)
+        {
+            return Ok(image.clone());
+        }
+        stretch_crop(image, crop, out_width, out_height)
+    }
+
+    /// Get the cached static renderer for `style` at `spec`, creating it if needed.
+    fn static_renderer(
+        &mut self,
+        style: &StyleId,
+        spec: ImageSpec,
+    ) -> Result<&mut ImageRenderer<Static>> {
+        let styles = &self.styles;
+        self.statics
+            .get_or_try_insert_with((style.clone(), spec), || {
+                let loaded = lookup_style(styles, style)?;
+                let mut renderer = ImageRendererBuilder::new()
+                    .with_size(spec.width, spec.height)
+                    .with_pixel_ratio(spec.pixel_ratio.get())
+                    .build_static_renderer();
+                load_style(&mut renderer, style, &loaded)?;
+                Ok(renderer)
+            })
     }
 
     fn render_tile(&mut self, req: TileRequest) -> Result<RgbaImage> {
@@ -127,6 +172,26 @@ impl Worker {
 
         Ok(image.as_image().clone())
     }
+}
+
+/// Edges of a crop closer than this to the image's, in pixels, are taken to be on them, so the
+/// image is used as is instead of being resampled.
+const STRETCH_TOLERANCE: f64 = 0.01;
+
+fn render_camera(renderer: &mut ImageRenderer<Static>, camera: &CameraUpdate) -> Result<RgbaImage> {
+    let image = renderer
+        .render_static(camera)
+        .map_err(|e| MapliError::RenderFailed(e.to_string()))?;
+    // Copy into an owned, Send buffer that can leave this thread
+    Ok(image.as_image().clone())
+}
+
+/// Size in physical pixels of an image rendered at `spec`, computed as MapLibre Native does.
+fn physical_size(spec: ImageSpec) -> (u32, u32) {
+    let ratio = spec.pixel_ratio.get();
+    // `as` truncates, as MapLibre Native's cast does
+    let scale = |logical: std::num::NonZeroU32| (logical.get() as f32 * ratio) as u32;
+    (scale(spec.width), scale(spec.height))
 }
 
 fn lookup_style(styles: &StyleRegistry, id: &StyleId) -> Result<Arc<Style>> {
