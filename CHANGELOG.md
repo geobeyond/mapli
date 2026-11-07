@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `RenderPool()` now releases the GIL while creating the pool, so other Python threads are no
+  longer blocked while the first pool in a process checks for EGL support
+
+
 ## [0.4.1] - 2026-10-22
 
 ### Added

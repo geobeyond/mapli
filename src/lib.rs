@@ -102,16 +102,20 @@ impl Drop for RenderPool {
 impl RenderPool {
     #[new]
     #[pyo3(signature = (workers = 1, max_renderers_per_worker = 8))]
-    fn new(workers: usize, max_renderers_per_worker: usize) -> PyResult<Self> {
+    fn new(py: Python<'_>, workers: usize, max_renderers_per_worker: usize) -> PyResult<Self> {
         let workers = NonZeroUsize::new(workers)
             .ok_or_else(|| PyValueError::new_err("workers must be >= 1"))?;
         let max_renderers_per_worker = NonZeroUsize::new(max_renderers_per_worker)
             .ok_or_else(|| PyValueError::new_err("max_renderers_per_worker must be >= 1"))?;
-        let inner = mapli_core::RenderPool::new(PoolConfig {
-            workers,
-            max_renderers_per_worker,
-        })
-        .map_err(to_py_err)?;
+        // release GIL while pool is created: first pool in a process runs the EGL probe, which can be slow
+        let inner = py
+            .detach(|| {
+                mapli_core::RenderPool::new(PoolConfig {
+                    workers,
+                    max_renderers_per_worker,
+                })
+            })
+            .map_err(to_py_err)?;
         Ok(Self {
             inner: ManuallyDrop::new(inner),
         })
