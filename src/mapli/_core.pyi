@@ -107,8 +107,8 @@ class RenderPool:
             workers: Number of worker threads. Each worker has its own MapLibre Native run loop,
                 OpenGL context and renderers, so memory use grows with this number.
             max_renderers_per_worker: Number of renderers each worker keeps. A worker keeps one
-                renderer per style and render mode; when this limit is reached, the least
-                recently used renderer is discarded.
+                renderer per style, render mode and pixel ratio, whatever the image size; when
+                this limit is reached, the least recently used renderer is discarded.
 
         Raises:
             ValueError: If `workers` or `max_renderers_per_worker` is lower than 1.
