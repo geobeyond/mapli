@@ -61,6 +61,11 @@ assert pool.has_style("demo")
 The style is not fetched or parsed when it is registered. Each worker loads it the first time it
 renders it.
 
+Registering a style again under the same id replaces it, and renders submitted afterwards use the
+new style. A style registered by `url` is fetched again only if the server's cache headers allow
+it: a response with `Cache-Control: max-age` is reused until it expires, even by new pools. To
+force a fresh copy, give the style a new URL, e.g. by adding a version to its query string.
+
 ## Output
 
 The render methods return the image as `bytes`, in the format chosen with `output`:

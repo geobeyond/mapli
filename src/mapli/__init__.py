@@ -173,6 +173,10 @@ class RenderPool(_core.RenderPool):
         is first used for rendering, so loading errors are raised by the render methods, as
         `StyleLoadError`.
 
+        Registering a style under an id that is already registered replaces it, even if the new
+        style is the same as the old one. Renders submitted after this returns use the new style;
+        renders already in progress may still use the old one.
+
         Args:
             style_id: The id to render the style by.
             url: URL of a style JSON document.

@@ -122,7 +122,10 @@ impl RenderPool {
         })
     }
 
-    /// Register a style with the pool under `style_id`. Pass exactly one of `url`, `path` or `json`
+    /// Register a style with the pool under `style_id`. Pass exactly one of `url`, `path` or `json`.
+    ///
+    /// Registering under an id that is already registered replaces the style; renders submitted
+    /// afterwards use the new one.
     #[pyo3(signature = (style_id, *, url=None, path=None, json=None))]
     fn register_style(
         &self,

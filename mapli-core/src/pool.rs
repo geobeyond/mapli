@@ -107,6 +107,11 @@ impl RenderPool {
     /// Register or replace a style in the pool's style registry.
     ///
     /// This allows workers to access the style when rendering.
+    ///
+    /// Registering a style under an id that is already registered replaces it, even if the new
+    /// style is equal to the old one. Renders submitted after this returns use the new style:
+    /// workers rebuild renderers they had cached for the old one, the first time they need them.
+    /// Renders already being drawn by a worker when this is called may still use the old style.
     pub fn register_style(&self, id: impl Into<StyleId>, style: Style) {
         let mut styles = self.styles.write().unwrap_or_else(|p| p.into_inner());
         styles.insert(id.into(), Arc::new(style));
