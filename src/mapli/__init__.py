@@ -14,6 +14,7 @@ from typing import (
 
 from . import _core
 from ._core import (
+    MAX_LAT,
     ErrorReason,
     GraphicsUnavailableError,
     MapliError,
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
     from typing_extensions import Buffer
 
 __all__ = [
+    "MAX_LAT",
     "ErrorReason",
     "GraphicsUnavailableError",
     "MapliError",
@@ -55,7 +57,7 @@ ResourceKind = Literal[
     "image",
     "unknown",
 ]
-"""What a `ResourceRequest` asks for. PMTiles archive reads are `"source"` requests."""
+"""Kind of resource a `ResourceRequest` asks for. PMTiles archive reads are `"source"` requests."""
 
 
 @_dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
@@ -68,7 +70,7 @@ class ResourceRequest:
     url: str
     """The full URL, including the scheme."""
     kind: ResourceKind
-    """What is being requested."""
+    """Kind of resource requested."""
     data_range: tuple[int, int] | None = None
     """Inclusive `(start, end)` byte range for partial reads, as made for PMTiles archives,
     else `None`."""
@@ -275,6 +277,84 @@ class RenderPool(_core.RenderPool):
             padding=padding,
             bearing=bearing,
             pitch=pitch,
+            pixel_ratio=pixel_ratio,
+            output=output,
+        )
+
+    def render_bbox(
+        self,
+        style_id: str,
+        *,
+        bbox: Iterable[float],
+        width: int,
+        height: int,
+        pixel_ratio: float = 1.0,
+        output: Literal["png", "rgba"] = "png",
+    ) -> bytes:
+        """Render a static map image covering exactly a bounding box, to PNG bytes or raw pixels.
+
+        The bounds, projected to Web Mercator, are stretched to the size of the image, as OGC
+        API Maps and WMS GetMap require. Pixels are not square when the aspect of the bounds
+        differs from the image's, so images of adjacent bounds line up with each other. To keep
+        pixels square instead, use `render_from_bounds`.
+
+        This method blocks until the image is rendered. The GIL is released while waiting though.
+
+        Args:
+            style_id: The id of a registered style.
+            bbox: `(west, south, east, north)`, in degrees, as in `render_from_bounds`. A `west`
+                greater than `east` means the bounds cross the antimeridian.
+            width: Width of the image, in logical pixels.
+            height: Height of the image, in logical pixels.
+            pixel_ratio: Number of image pixels per logical pixel. The image is
+                `width * pixel_ratio` by `height * pixel_ratio` pixels.
+            output: `"png"` for PNG-encoded bytes, or `"rgba"` for the raw pixels, which skips
+                PNG encoding, e.g. to hand the image to Pillow or numpy.
+
+        Returns:
+            The image: PNG encoded with `output="png"`, or with `output="rgba"`, its raw pixels,
+                row by row from the top-left, 4 bytes (red, green, blue, alpha) per pixel, with
+                straight (not premultiplied) alpha. The image is `floor(width * pixel_ratio)` by
+                `floor(height * pixel_ratio)` pixels.
+
+        Raises:
+            ValueError: If `bbox` does not have 4 values, or an argument is out of range, e.g.
+                a latitude beyond ±85.0511°, or `output` is neither `"png"` nor `"rgba"`.
+            UnknownStyleError: If no style is registered under `style_id`.
+            StyleLoadError: If MapLibre Native fails to load the style.
+            RenderError: If MapLibre Native fails to render the image.
+        """
+        return super().render_bbox(
+            style_id,
+            bbox=_to_bbox(bbox),
+            width=width,
+            height=height,
+            pixel_ratio=pixel_ratio,
+            output=output,
+        )
+
+    async def arender_bbox(
+        self,
+        style_id: str,
+        *,
+        bbox: Iterable[float],
+        width: int,
+        height: int,
+        pixel_ratio: float = 1.0,
+        output: Literal["png", "rgba"] = "png",
+    ) -> bytes:
+        """Asynchronously render a static map image covering exactly a bounding box.
+
+        Takes the same arguments, and raises the same exceptions, as `render_bbox`. The request
+        is submitted to the pool when the returned coroutine is first awaited, which must happen
+        inside an asyncio event loop. Cancelling the coroutine skips the render if no worker has
+        started it yet.
+        """
+        return await super().arender_bbox(
+            style_id,
+            bbox=_to_bbox(bbox),
+            width=width,
+            height=height,
             pixel_ratio=pixel_ratio,
             output=output,
         )

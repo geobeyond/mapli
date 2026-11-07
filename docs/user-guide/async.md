@@ -6,6 +6,7 @@ Each render method has an `async` version for use with `asyncio`:
 |---|---|
 | `render` | `arender` |
 | `render_from_bounds` | `arender_from_bounds` |
+| `render_bbox` | `arender_bbox` |
 | `render_tile` | `arender_tile` |
 
 The async methods take the same arguments and raise the same exceptions as the blocking ones.

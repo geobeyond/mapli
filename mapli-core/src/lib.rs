@@ -1,8 +1,10 @@
+mod bbox;
 #[cfg(target_os = "linux")]
 mod egl;
 mod encode;
 mod error;
 mod pool;
+mod resample;
 mod scheme;
 mod types;
 mod worker;

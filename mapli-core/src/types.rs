@@ -233,6 +233,12 @@ impl Bounds {
         self.west > self.east
     }
 
+    /// `east`, shifted past 180 when the bounds cross the antimeridian, so that it is greater
+    /// than `west`.
+    pub(crate) fn unwrapped_east(&self) -> f64 {
+        unwrap_east(self.west, self.east)
+    }
+
     /// Convert to a maplibre_native LatLngBounds
     ///
     /// MapLibre builds the bounds as the hull of both corners, which would turn an
@@ -246,7 +252,7 @@ impl Bounds {
             },
             northeast: maplibre_native::LatLng {
                 lat: self.north,
-                lng: unwrap_east(self.west, self.east),
+                lng: self.unwrapped_east(),
             },
         }
     }
@@ -322,11 +328,18 @@ impl From<Bounds> for BoundsToFit {
     }
 }
 
-/// What a static image shows: either an explicit camera or bounds to fit
+/// Map area shown in a static image
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum View {
+    /// An explicit camera
     Camera(Camera),
+    /// Bounds fitted inside the image, keeping pixels square, so the image usually shows more
+    /// than the bounds along one axis
     BoundsToFit(BoundsToFit),
+    /// Exactly the bounds, projected to Web Mercator and stretched to the size of the image, as
+    /// OGC API Maps and WMS GetMap require. Pixels are not square when the aspect of the bounds
+    /// differs from the image's.
+    ExactBounds(Bounds),
 }
 
 impl From<Camera> for View {
@@ -642,7 +655,7 @@ impl fmt::Display for ErrorReason {
     }
 }
 
-/// What a scheme handler answers a request with.
+/// Response of a scheme handler to a request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SchemeResponse {
     Data(Vec<u8>),
