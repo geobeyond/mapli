@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `output` keyword on render methods: `output="rgba"` returns the raw pixels, skipping PNG
   encoding. The default, `output="png"`, returns PNG bytes
+### Changed
+- `RenderPool()` now releases the GIL while creating the pool, so other Python threads are no
+  longer blocked while the first pool in a process checks for EGL support
+
 
 ## [0.4.1] - 2026-10-22
 
