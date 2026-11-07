@@ -11,7 +11,7 @@ use std::sync::Arc;
 use crossbeam_channel::Receiver;
 use image::RgbaImage;
 use maplibre_native::{
-    CameraUpdate, EdgeInsets, ImageRenderer, ImageRendererBuilder, Static, Tile,
+    CameraUpdate, EdgeInsets, ImageRenderer, ImageRendererBuilder, Size, Static, Tile,
 };
 
 use crate::bbox::plan_bbox_render;
@@ -60,21 +60,23 @@ pub(crate) fn run(rx: Receiver<Command>, styles: StyleRegistry, max_renderers: u
     }
 }
 
-type StaticKey = (StyleId, ImageSpec);
+/// Static renderers are resized before each render, so the image size is not part of their key.
+/// The pixel ratio is, as it is fixed when a renderer is built.
+type StaticKey = (StyleId, PixelRatio);
 type TileKey = (StyleId, NonZeroU32, PixelRatio);
 
 struct Worker {
     styles: StyleRegistry,
-    statics: RendererCache<StaticKey, ImageRenderer<Static>>,
-    tiles: RendererCache<TileKey, ImageRenderer<Tile>>,
+    static_renderers: RendererCache<StaticKey, ImageRenderer<Static>>,
+    tile_renderers: RendererCache<TileKey, ImageRenderer<Tile>>,
 }
 
 impl Worker {
     fn new(styles: StyleRegistry, max_renderers: usize) -> Self {
         Self {
             styles,
-            statics: RendererCache::new(max_renderers),
-            tiles: RendererCache::new(max_renderers),
+            static_renderers: RendererCache::new(max_renderers),
+            tile_renderers: RendererCache::new(max_renderers),
         }
     }
 
@@ -132,15 +134,17 @@ impl Worker {
         stretch_crop(image, crop, out_width, out_height)
     }
 
-    /// Get the cached static renderer for `style` at `spec`, creating it if needed.
+    /// Get the cached static renderer for `style` at `spec`'s pixel ratio, creating it if needed,
+    /// and size it to `spec`.
     fn static_renderer(
         &mut self,
         style: &StyleId,
         spec: ImageSpec,
     ) -> Result<&mut ImageRenderer<Static>> {
         let styles = &self.styles;
-        self.statics
-            .get_or_try_insert_with((style.clone(), spec), || {
+        let renderer = self.static_renderers.get_or_try_insert_with(
+            (style.clone(), spec.pixel_ratio),
+            || {
                 let loaded = lookup_style(styles, style)?;
                 let mut renderer = ImageRendererBuilder::new()
                     .with_size(spec.width, spec.height)
@@ -148,14 +152,22 @@ impl Worker {
                     .build_static_renderer();
                 load_style(&mut renderer, style, &loaded)?;
                 Ok(renderer)
-            })
+            },
+        )?;
+        // Cheap when the size is unchanged: MapLibre Native only reallocates the framebuffer
+        // when the size differs
+        renderer.set_map_size(Size {
+            width: spec.width.get(),
+            height: spec.height.get(),
+        });
+        Ok(renderer)
     }
 
     fn render_tile(&mut self, req: TileRequest) -> Result<RgbaImage> {
         let key = (req.style.clone(), req.tile_size, req.pixel_ratio);
 
         let styles = &self.styles;
-        let renderer = self.tiles.get_or_try_insert_with(key, || {
+        let renderer = self.tile_renderers.get_or_try_insert_with(key, || {
             let style = lookup_style(styles, &req.style)?;
             // tile renderers use the width as the tile size, so the size must be square
             let mut renderer = ImageRendererBuilder::new()

@@ -35,7 +35,9 @@ pub struct PoolConfig {
     pub workers: NonZeroUsize,
 
     /// Maximum number of cached renderers per worker, for each render mode. A worker keeps up to
-    /// this many static renderers and, separately, up to this many tile renderers.
+    /// this many static renderers and, separately, up to this many tile renderers. Static
+    /// renderers are kept per style and pixel ratio, and resized for each render, so image sizes
+    /// do not take up extra renderers.
     pub max_renderers_per_worker: NonZeroUsize,
 }
 

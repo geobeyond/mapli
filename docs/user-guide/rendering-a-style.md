@@ -23,9 +23,11 @@ call is handed to a worker, so a pool renders up to `workers` images at the same
 worker has its own MapLibre Native run loop and OpenGL context, so memory use grows with the
 number of workers.
 
-A worker keeps one MapLibre Native renderer per style and render mode (static image or tile), and
-reuses it across render calls. `max_renderers_per_worker` (default `8`) limits how many renderers
-a worker keeps; when the limit is reached, the least recently used one is discarded.
+A worker keeps one MapLibre Native renderer per style, render mode (static image or tile) and
+pixel ratio, and reuses it across render calls. Static image renderers are resized for each
+render, so requests for different image sizes share a renderer; tile renderers are also kept per
+tile size. `max_renderers_per_worker` (default `8`) limits how many renderers a worker keeps;
+when the limit is reached, the least recently used one is discarded.
 
 A pool can be shared between threads. The render methods release the GIL while they wait for the
 image. The worker threads stop when the last reference to the pool is dropped.

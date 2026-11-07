@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `RenderPool()` now releases the GIL while creating the pool, so other Python threads are no
   longer blocked while the first pool in a process checks for EGL support
+- Static image renderers are cached per style and pixel ratio, and resized for each render,
+  instead of one per image size. Requests for many different sizes no longer evict renderers
+  and reload their styles
 
 
 ## [0.4.1] - 2026-10-22
