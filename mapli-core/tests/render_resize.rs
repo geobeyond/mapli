@@ -29,7 +29,7 @@ const STYLE: &str = r##"{
 }"##;
 
 /// Pool whose single worker keeps a single static renderer.
-fn single_renderer_pool() -> RenderPool {
+fn create_single_renderer_pool() -> RenderPool {
     let pool = RenderPool::new(PoolConfig {
         workers: NonZeroUsize::new(1).unwrap(),
         max_renderers_per_worker: NonZeroUsize::new(1).unwrap(),
@@ -39,7 +39,7 @@ fn single_renderer_pool() -> RenderPool {
     pool
 }
 
-fn render(pool: &RenderPool, view: View, spec: ImageSpec) -> RgbaImage {
+fn render_image(pool: &RenderPool, view: View, spec: ImageSpec) -> RgbaImage {
     let req = StaticRequest {
         style: "box".into(),
         view,
@@ -52,17 +52,17 @@ fn render(pool: &RenderPool, view: View, spec: ImageSpec) -> RgbaImage {
     }
 }
 
-fn spec(width: u32, height: u32) -> ImageSpec {
+fn build_image_spec(width: u32, height: u32) -> ImageSpec {
     ImageSpec::new(width, height).unwrap()
 }
 
 /// Render `view` at each of `sizes` with one pool, and check each image against one from a new
 /// pool.
 fn assert_resized_matches_fresh(view: View, sizes: &[ImageSpec]) {
-    let reused = single_renderer_pool();
+    let reused = create_single_renderer_pool();
     for &size in sizes {
-        let img = render(&reused, view, size);
-        let expected = render(&single_renderer_pool(), view, size);
+        let img = render_image(&reused, view, size);
+        let expected = render_image(&create_single_renderer_pool(), view, size);
         assert_eq!(
             img.dimensions(),
             expected.dimensions(),
@@ -80,7 +80,12 @@ fn camera_renders_match_after_resizing() {
     let camera = Camera::new(0.0, 0.0, 3.0).unwrap();
     assert_resized_matches_fresh(
         camera.into(),
-        &[spec(64, 64), spec(200, 100), spec(64, 64), spec(100, 300)],
+        &[
+            build_image_spec(64, 64),
+            build_image_spec(200, 100),
+            build_image_spec(64, 64),
+            build_image_spec(100, 300),
+        ],
     );
 }
 
@@ -90,7 +95,14 @@ fn bounds_to_fit_uses_resized_renderer() {
     let fit = BoundsToFit::new(Bounds::new(-10.0, -5.0, 10.0, 5.0).unwrap())
         .with_padding(10.0)
         .unwrap();
-    assert_resized_matches_fresh(fit.into(), &[spec(64, 64), spec(300, 120), spec(80, 200)]);
+    assert_resized_matches_fresh(
+        fit.into(),
+        &[
+            build_image_spec(64, 64),
+            build_image_spec(300, 120),
+            build_image_spec(80, 200),
+        ],
+    );
 }
 
 #[test]
@@ -98,17 +110,25 @@ fn exact_bounds_render_after_resizing() {
     let bounds = Bounds::new(-10.0, -5.0, 10.0, 5.0).unwrap();
     assert_resized_matches_fresh(
         View::ExactBounds(bounds),
-        &[spec(64, 64), spec(200, 100), spec(50, 150)],
+        &[
+            build_image_spec(64, 64),
+            build_image_spec(200, 100),
+            build_image_spec(50, 150),
+        ],
     );
 }
 
 #[test]
 fn image_dimensions_follow_pixel_ratio_after_resizing() {
-    let pool = single_renderer_pool();
+    let pool = create_single_renderer_pool();
     let camera: View = Camera::new(0.0, 0.0, 3.0).unwrap().into();
     let ratio = PixelRatio::new(2.0).unwrap();
     for (width, height) in [(64, 64), (200, 100), (64, 64)] {
-        let img = render(&pool, camera, spec(width, height).with_pixel_ratio(ratio));
+        let img = render_image(
+            &pool,
+            camera,
+            build_image_spec(width, height).with_pixel_ratio(ratio),
+        );
         assert_eq!(img.dimensions(), (width * 2, height * 2));
     }
 }

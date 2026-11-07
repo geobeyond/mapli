@@ -19,6 +19,10 @@
 //! MapLibre Native's PMTiles support have already loaded is not fetched again when a handler is
 //! replaced.
 //!
+//! The dispatcher also enforces the rules of
+//! [`restrict_resource_urls`](crate::restrict_resource_urls): it claims the URLs that they deny,
+//! whatever their scheme, and answers them with an error.
+//!
 //! Requests are queued to a pool of handler threads owned by this module, and their responses
 //! are delivered from there.
 //!
@@ -40,6 +44,7 @@ use maplibre_native::{
 
 use crate::error::{MapliError, Result};
 use crate::types::{ErrorReason, SchemeRequest, SchemeResponse};
+use crate::url_rules;
 
 /// Number of threads that run scheme handlers.
 pub const HANDLER_THREADS: usize = 8;
@@ -280,14 +285,20 @@ struct Dispatcher;
 
 impl FileSource for Dispatcher {
     fn can_request(&self, request: &ResourceRequest) -> bool {
-        DISPATCH
-            .get()
-            .is_some_and(|dispatch| dispatch.handler_for(&request.url).is_some())
+        url_rules::denies(&request.url)
+            || DISPATCH
+                .get()
+                .is_some_and(|dispatch| dispatch.handler_for(&request.url).is_some())
     }
 
     /// Called on a MapLibre Native thread, which must not wait for the handler: queue the
     /// request to the handler threads instead.
     fn request(&self, request: ResourceRequest, responder: Responder) -> RequestHandle {
+        if url_rules::denies(&request.url) {
+            let message = format!("{}: access denied by URL rules", request.url);
+            responder.complete(Response::error(MlnErrorReason::Other, message));
+            return RequestHandle::Done;
+        }
         let Some(dispatch) = DISPATCH.get() else {
             responder.complete(Response::error(MlnErrorReason::Other, "no scheme handlers"));
             return RequestHandle::Done;

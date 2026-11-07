@@ -16,7 +16,7 @@ const RED: [u8; 4] = [255, 0, 0, 255];
 const WHITE: [u8; 4] = [255, 255, 255, 255];
 
 /// Style that paints the GeoJSON at `data_url` red over a white background.
-fn style_json(data_url: &str) -> String {
+fn build_style_json(data_url: &str) -> String {
     format!(
         r##"{{
             "version": 8,
@@ -49,7 +49,7 @@ impl SchemeHandler for MemoryHandler {
     }
 }
 
-fn render(pool: &RenderPool, style: &str) -> mapli_core::Result<RgbaImage> {
+fn render_style(pool: &RenderPool, style: &str) -> mapli_core::Result<RgbaImage> {
     let req = StaticRequest {
         style: style.into(),
         view: Camera::new(0.0, 0.0, 0.0).unwrap().into(),
@@ -80,7 +80,7 @@ fn scheme_handlers_can_change_while_pools_exist() {
         resources: HashMap::from([
             (
                 "mem://style.json".to_string(),
-                style_json("mem://box.geojson").into_bytes(),
+                build_style_json("mem://box.geojson").into_bytes(),
             ),
             ("mem://box.geojson".to_string(), BOX.as_bytes().to_vec()),
         ]),
@@ -90,7 +90,7 @@ fn scheme_handlers_can_change_while_pools_exist() {
 
     // the style and its source both come from the handler
     pool.register_style("box", Style::Url("mem://style.json".parse().unwrap()));
-    let img = render(&pool, "box").unwrap();
+    let img = render_style(&pool, "box").unwrap();
     assert_eq!(img.get_pixel(32, 32).0, RED);
     assert_eq!(img.get_pixel(0, 0).0, WHITE);
     {
@@ -101,8 +101,11 @@ fn scheme_handlers_can_change_while_pools_exist() {
     }
 
     // a handler error reaches the render, with the URL, the reason and the handler's message
-    pool.register_style("missing", Style::Json(style_json("mem://missing.geojson")));
-    let detail = match render(&pool, "missing") {
+    pool.register_style(
+        "missing",
+        Style::Json(build_style_json("mem://missing.geojson")),
+    );
+    let detail = match render_style(&pool, "missing") {
         Err(MapliError::RenderFailed(detail)) => detail,
         other => panic!("expected RenderFailed, got {other:?}"),
     };
@@ -116,8 +119,11 @@ fn scheme_handlers_can_change_while_pools_exist() {
         ..Default::default()
     });
     register_scheme_handler("mem", replacement.clone()).unwrap();
-    pool.register_style("other", Style::Json(style_json("mem://other.geojson")));
-    let img = render(&pool, "other").unwrap();
+    pool.register_style(
+        "other",
+        Style::Json(build_style_json("mem://other.geojson")),
+    );
+    let img = render_style(&pool, "other").unwrap();
     assert_eq!(img.get_pixel(32, 32).0, RED);
     let served_by = |h: &MemoryHandler| {
         h.requests
@@ -131,8 +137,8 @@ fn scheme_handlers_can_change_while_pools_exist() {
 
     // once unregistered, the scheme's URLs are no longer served
     unregister_scheme_handler("mem").unwrap();
-    pool.register_style("gone", Style::Json(style_json("mem://gone.geojson")));
-    let result = render(&pool, "gone");
+    pool.register_style("gone", Style::Json(build_style_json("mem://gone.geojson")));
+    let result = render_style(&pool, "gone");
     assert!(
         matches!(result, Err(MapliError::RenderFailed(_))),
         "{result:?}"

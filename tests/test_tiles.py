@@ -16,14 +16,14 @@ STYLE = {
 TILE: dict[str, Any] = {"z": 2, "x": 1, "y": 1}
 
 
-def png_size(png: bytes) -> tuple[int, int]:
+def read_png_size(png: bytes) -> tuple[int, int]:
     """Read width and height from the PNG IHDR chunk."""
     assert png.startswith(b"\x89PNG")
     return struct.unpack(">II", png[16:24])
 
 
-@pytest.fixture
-def pool() -> mapli.RenderPool:
+@pytest.fixture(name="pool")
+def create_pool() -> mapli.RenderPool:
     pool = mapli.RenderPool(workers=2)
     pool.register_style("bg", json=STYLE)
     return pool
@@ -37,11 +37,11 @@ def test_render_tile_size(
     pool: mapli.RenderPool, tile_size: int, pixel_ratio: float, expected: int
 ) -> None:
     png = pool.render_tile("bg", **TILE, tile_size=tile_size, pixel_ratio=pixel_ratio)
-    assert png_size(png) == (expected, expected)
+    assert read_png_size(png) == (expected, expected)
 
 
 def test_render_tile_defaults_to_512(pool: mapli.RenderPool) -> None:
-    assert png_size(pool.render_tile("bg", z=0, x=0, y=0)) == (512, 512)
+    assert read_png_size(pool.render_tile("bg", z=0, x=0, y=0)) == (512, 512)
 
 
 def test_arender_tile_matches_render_tile(pool: mapli.RenderPool) -> None:

@@ -60,6 +60,12 @@ create_exception!(
     MapliError,
     "No scheme handler is registered for the scheme"
 );
+create_exception!(
+    mapli,
+    UrlRulesClosedError,
+    MapliError,
+    "The URL rules can no longer be set"
+);
 
 fn to_py_err(err: mapli_core::MapliError) -> PyErr {
     use mapli_core::MapliError as E;
@@ -71,6 +77,7 @@ fn to_py_err(err: mapli_core::MapliError) -> PyErr {
         E::RenderFailed(_) | E::PngEncodingFailed(_) => RenderError::new_err(msg),
         E::GraphicsUnavailable(_) => GraphicsUnavailableError::new_err(msg),
         E::UnknownScheme(_) => UnknownSchemeError::new_err(msg),
+        E::UrlRulesClosed(_) => UrlRulesClosedError::new_err(msg),
         _ => MapliError::new_err(msg),
     }
 }
@@ -793,6 +800,15 @@ fn unregister_scheme_handler(scheme: &str) -> PyResult<()> {
     mapli_core::unregister_scheme_handler(scheme).map_err(to_py_err)
 }
 
+/// Only allow MapLibre Native to fetch the URLs that start with one of `allowed_url_prefixes`,
+/// process-wide.
+///
+/// Can only be called once, before the first render pool is created.
+#[pyfunction]
+fn restrict_resource_urls(allowed_url_prefixes: Vec<String>) -> PyResult<()> {
+    mapli_core::restrict_resource_urls(&allowed_url_prefixes).map_err(to_py_err)
+}
+
 /// The function name must match the last segment of `module-name` in the pyproject.toml file
 /// and also the `lib[name] in Cargo.toml.
 #[pymodule]
@@ -803,6 +819,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ErrorReason>()?;
     m.add_function(wrap_pyfunction!(register_scheme_handler, m)?)?;
     m.add_function(wrap_pyfunction!(unregister_scheme_handler, m)?)?;
+    m.add_function(wrap_pyfunction!(restrict_resource_urls, m)?)?;
     m.add("MAX_LAT", mapli_core::MAX_LAT)?;
 
     let py = m.py();
@@ -811,6 +828,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("StyleLoadError", py.get_type::<StyleLoadError>())?;
     m.add("RenderError", py.get_type::<RenderError>())?;
     m.add("UnknownSchemeError", py.get_type::<UnknownSchemeError>())?;
+    m.add("UrlRulesClosedError", py.get_type::<UrlRulesClosedError>())?;
     m.add(
         "GraphicsUnavailableError",
         py.get_type::<GraphicsUnavailableError>(),

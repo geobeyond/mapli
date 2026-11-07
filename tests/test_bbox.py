@@ -19,14 +19,14 @@ VIEW_SIZE: dict[str, Any] = {"width": 64, "height": 48}
 VIEW: dict[str, Any] = {"bbox": LISBON, **VIEW_SIZE}
 
 
-def png_size(png: bytes) -> tuple[int, int]:
+def read_png_size(png: bytes) -> tuple[int, int]:
     """Read width and height from the PNG IHDR chunk."""
     assert png.startswith(b"\x89PNG")
     return struct.unpack(">II", png[16:24])
 
 
-@pytest.fixture
-def pool() -> mapli.RenderPool:
+@pytest.fixture(name="pool")
+def create_pool() -> mapli.RenderPool:
     pool = mapli.RenderPool(workers=2)
     pool.register_style("bg", json=STYLE)
     return pool
@@ -39,7 +39,7 @@ def test_render_bbox_size(
     pool: mapli.RenderPool, pixel_ratio: float, expected: tuple[int, int]
 ) -> None:
     png = pool.render_bbox("bg", **VIEW, pixel_ratio=pixel_ratio)
-    assert png_size(png) == expected
+    assert read_png_size(png) == expected
 
 
 def test_render_bbox_rgba_output(pool: mapli.RenderPool) -> None:
@@ -60,13 +60,13 @@ def test_arender_bbox_matches_render_bbox(pool: mapli.RenderPool) -> None:
 )
 def test_render_bbox_accepts_iterables(pool: mapli.RenderPool, bbox: Any) -> None:
     png = pool.render_bbox("bg", bbox=bbox, width=64, height=48)
-    assert png_size(png) == (64, 48)
+    assert read_png_size(png) == (64, 48)
 
 
 def test_max_lat_is_accepted_and_beyond_it_is_not(pool: mapli.RenderPool) -> None:
     whole_world = (-180, -mapli.MAX_LAT, 180, mapli.MAX_LAT)
     png = pool.render_bbox("bg", bbox=whole_world, **VIEW_SIZE)
-    assert png_size(png) == (64, 48)
+    assert read_png_size(png) == (64, 48)
     with pytest.raises(ValueError):
         pool.render_bbox(
             "bg", bbox=(-180, -mapli.MAX_LAT, 180, mapli.MAX_LAT + 1e-9), **VIEW_SIZE
@@ -80,7 +80,7 @@ def test_max_lat_is_accepted_and_beyond_it_is_not(pool: mapli.RenderPool) -> Non
 )
 def test_render_bbox_edge_cases(pool: mapli.RenderPool, bbox: Any) -> None:
     png = pool.render_bbox("bg", bbox=bbox, width=64, height=48)
-    assert png_size(png) == (64, 48)
+    assert read_png_size(png) == (64, 48)
 
 
 @pytest.mark.parametrize(

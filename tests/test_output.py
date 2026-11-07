@@ -27,8 +27,8 @@ BBOX = (-10.0, -10.0, 10.0, 10.0)
 TILE: dict[str, Any] = {"z": 2, "x": 1, "y": 1, "tile_size": 256}
 
 
-@pytest.fixture
-def pool() -> mapli.RenderPool:
+@pytest.fixture(name="pool")
+def create_pool() -> mapli.RenderPool:
     pool = mapli.RenderPool(workers=2)
     pool.register_style("bg", json=STYLE)
     return pool

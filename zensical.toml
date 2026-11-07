@@ -18,6 +18,7 @@ nav = [
     { "Tiles" = "user-guide/tiles.md" },
     { "Async rendering" = "user-guide/async.md" },
     { "Custom URL schemes" = "user-guide/custom-url-schemes.md" },
+    { "Restricting URLs" = "user-guide/restricting-urls.md" },
   ] },
   { "API reference" = "reference/" },
   { "Examples" = [
@@ -25,6 +26,7 @@ nav = [
     { "Concurrent thumbnails" = "examples/thumbnails.md" },
     { "FastAPI web API" = "examples/fastapi.md" },
     { "Private bucket with obstore" = "examples/private-bucket.md" },
+    { "Untrusted styles" = "examples/untrusted-styles.md" },
   ] },
   { "Development" = [
     "development/index.md",

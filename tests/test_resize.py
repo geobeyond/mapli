@@ -13,8 +13,8 @@ STYLE = {
 }
 
 
-@pytest.fixture
-def pool() -> mapli.RenderPool:
+@pytest.fixture(name="pool")
+def create_pool() -> mapli.RenderPool:
     # a single renderer, so every render below reuses it
     pool = mapli.RenderPool(workers=1, max_renderers_per_worker=1)
     pool.register_style("bg", json=STYLE)

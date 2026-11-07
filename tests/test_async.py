@@ -22,8 +22,8 @@ VIEW: dict[str, Any] = {
 }
 
 
-@pytest.fixture
-def pool() -> mapli.RenderPool:
+@pytest.fixture(name="pool")
+def create_pool() -> mapli.RenderPool:
     pool = mapli.RenderPool(workers=2)
     pool.register_style("bg", json=STYLE)
     return pool

@@ -8,16 +8,16 @@ import mapli
 Handler = Callable[[mapli.ResourceRequest], object]
 
 
-def pmtiles_handler(archive: bytes) -> Callable[[mapli.ResourceRequest], bytes]:
+def build_pmtiles_handler(archive: bytes) -> Callable[[mapli.ResourceRequest], bytes]:
     """A handler serving `archive`, a PMTiles archive, answering range reads."""
 
-    def handler(request: mapli.ResourceRequest) -> bytes:
+    def serve_archive_range(request: mapli.ResourceRequest) -> bytes:
         if request.data_range is None:
             return archive
         start, end = request.data_range  # inclusive
         return archive[start : end + 1]
 
-    return handler
+    return serve_archive_range
 
 
 PMTILES_HEADER_LENGTH = 127
@@ -32,7 +32,7 @@ def build_pmtiles(tile: bytes) -> bytes:
     https://github.com/protomaps/PMTiles/blob/main/spec/v3/spec.md
     """
     # one entry: tile id 0 (z0), run length 1, the tile's length, offset 0 (encoded as offset + 1)
-    root = b"".join(_varint(n) for n in (1, 0, 1, len(tile), 0 + 1))
+    root = b"".join(_encode_varint(n) for n in (1, 0, 1, len(tile), 0 + 1))
     metadata = json.dumps({"name": "test"}).encode()
     root_offset = PMTILES_HEADER_LENGTH
     metadata_offset = root_offset + len(root)
@@ -66,7 +66,7 @@ def build_pmtiles(tile: bytes) -> bytes:
     return bytes(header) + root + metadata + tile
 
 
-def _varint(n: int) -> bytes:
+def _encode_varint(n: int) -> bytes:
     """Encode `n` as an unsigned LEB128 varint, as PMTiles directories do."""
     out = bytearray()
     while True:

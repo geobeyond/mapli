@@ -32,7 +32,7 @@ _STYLES = {
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def manage_render_pool(app: FastAPI):
     pool = mapli.RenderPool(workers=4)
     for id_, url in _STYLES.items():
         pool.register_style(id_, url=url)
@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
     del app.state.mapli_render_pool  # dropping the pool shuts down the workers
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=manage_render_pool)
 
 
 @app.get(
