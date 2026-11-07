@@ -1,4 +1,9 @@
-# mapli
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/geobeyond/mapli/main/docs/img/mapli-logo-and-lettering-400-dark.png">
+    <img alt="mapli logo" src="https://raw.githubusercontent.com/geobeyond/mapli/main/docs/img/mapli-logo-and-lettering-400-light.png" width="200">
+  </picture>
+</p>
 
 mapli is a Python package that renders [MapLibre styles] to PNG images. Rendering is done by
 [MapLibre Native], which mapli runs inside the Python process through the [maplibre_native] Rust

@@ -1,5 +1,10 @@
 # mapli
 
+<div align="center" markdown>
+![mapli logo](img/mapli-logo-and-lettering-400-light.png#only-light){ width="200" }
+![mapli logo](img/mapli-logo-and-lettering-400-dark.png#only-dark){ width="200" }
+</div>
+
 mapli is a Python package that renders [MapLibre styles] to PNG images. A MapLibre style is a JSON
 document that describes the data sources of a map and how to draw them. Rendering is done by
 [MapLibre Native], the C++ map renderer of the MapLibre project, which mapli runs inside the
@@ -16,7 +21,8 @@ MapLibre Native from Python, through custom URL scheme handlers.
 !!! note "Platform support"
 
     mapli currently runs on Linux only (x86_64 and ARM64, glibc 2.34 or newer). Rendering needs
-    an EGL driver and a display, see [System requirements](user-guide/system-requirements.md).
+    an EGL driver, libcurl and a display (or Xvfb), see
+    [System requirements](user-guide/system-requirements.md).
 
 
 ## Installation
